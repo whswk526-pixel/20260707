@@ -247,6 +247,78 @@
     padding: var(--sp-lg);
     margin-bottom: var(--sp-xl);
   }
+  .mode-tabs {
+    display: flex;
+    gap: var(--sp-xs);
+    margin-bottom: var(--sp-lg);
+  }
+  .mode-tab {
+    flex: 1;
+    text-align: center;
+    padding: 10px;
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    color: var(--ink-muted);
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: -0.01em;
+    cursor: pointer;
+    border: 1px solid var(--hairline);
+    transition: all 0.15s ease;
+  }
+  .mode-tab.active {
+    background: var(--ink);
+    color: var(--on-primary);
+    border-color: var(--ink);
+  }
+
+  .manual-grid {
+    display: grid;
+    grid-template-columns: repeat(9, 1fr);
+    gap: 8px;
+    margin-bottom: var(--sp-lg);
+  }
+  .mnum {
+    aspect-ratio: 1;
+    border-radius: var(--r-full);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    background: var(--surface-2);
+    color: var(--ink-muted);
+    border: 1px solid var(--hairline);
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.12s ease;
+  }
+  .mnum:hover { border-color: var(--ink-muted); }
+  .mnum.selected {
+    color: #ffffff;
+    border-color: transparent;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.18), 0 3px 8px rgba(0,0,0,0.4);
+    transform: scale(1.06);
+  }
+
+  .manual-footer {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-sm);
+  }
+  .manual-count {
+    flex: 1;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-muted);
+  }
+  .manual-footer .btn-primary {
+    flex: 0 0 auto;
+    padding: 0 22px;
+    height: 40px;
+  }
+  .manual-footer .btn-primary:disabled { opacity: 0.4; }
+
   .presets {
     display: flex;
     gap: var(--sp-xs);
@@ -384,6 +456,13 @@
     font-weight: 700;
     color: var(--ink-muted);
     letter-spacing: -0.01em;
+  }
+  .row .label.manual {
+    color: var(--accent-blue);
+    background: rgba(0,153,255,0.12);
+    border-radius: var(--r-sm);
+    padding: 4px 6px;
+    text-align: center;
   }
 
   .balls {
@@ -608,21 +687,37 @@
   </div>
 
   <div class="panel">
-    <div class="presets">
-      <div class="chip" data-count="1">1게임</div>
-      <div class="chip active" data-count="5">5게임</div>
-      <div class="chip" data-count="10">10게임</div>
-      <div class="chip" data-count="20">20게임(최대)</div>
+    <div class="mode-tabs">
+      <div class="mode-tab active" data-mode="auto" onclick="setMode('auto')">🎲 자동 추첨</div>
+      <div class="mode-tab" data-mode="manual" onclick="setMode('manual')">✍️ 수동 선택</div>
     </div>
-    <div class="controls">
-      <div class="field">
-        <label for="count">게임 수</label>
-        <input type="number" id="count" min="1" max="20" value="5">
+
+    <div id="auto-panel">
+      <div class="presets">
+        <div class="chip" data-count="1">1게임</div>
+        <div class="chip active" data-count="5">5게임</div>
+        <div class="chip" data-count="10">10게임</div>
+        <div class="chip" data-count="20">20게임(최대)</div>
       </div>
-      <button class="btn-primary" id="draw-btn" onclick="startDraw()">
-        <span class="dice">🎲</span>
-        <span class="btn-label">추첨하기</span>
-      </button>
+      <div class="controls">
+        <div class="field">
+          <label for="count">게임 수</label>
+          <input type="number" id="count" min="1" max="20" value="5">
+        </div>
+        <button class="btn-primary" id="draw-btn" onclick="startDraw()">
+          <span class="dice">🎲</span>
+          <span class="btn-label">추첨하기</span>
+        </button>
+      </div>
+    </div>
+
+    <div id="manual-panel" style="display:none;">
+      <div class="manual-grid" id="manual-grid"></div>
+      <div class="manual-footer">
+        <span class="manual-count" id="manual-count">0 / 6 선택됨</span>
+        <div class="chip" onclick="clearManual()">초기화</div>
+        <button class="btn-primary" id="manual-add-btn" onclick="addManualGame()" disabled>내 번호 추가</button>
+      </div>
     </div>
   </div>
 
@@ -677,17 +772,20 @@ function generateOne() {
   return picked.sort((a, b) => a - b);
 }
 
-function renderResults(sets) {
+let resultState = []; // { numbers: number[], type: "auto" | "manual" }
+
+function renderAllResults() {
   const resultsEl = document.getElementById("results");
   resultsEl.innerHTML = "";
 
-  sets.forEach((numbers, i) => {
+  resultState.forEach((entry, i) => {
+    const { numbers, type } = entry;
     const row = document.createElement("div");
     row.className = "row" + (i === 0 ? " selected" : "");
 
     const label = document.createElement("div");
-    label.className = "label";
-    label.textContent = `${String(i + 1).padStart(2, "0")} GAME`;
+    label.className = "label" + (type === "manual" ? " manual" : "");
+    label.textContent = type === "manual" ? "수동" : `${String(i + 1).padStart(2, "0")} GAME`;
     row.appendChild(label);
 
     const balls = document.createElement("div");
@@ -720,7 +818,12 @@ function renderResults(sets) {
     resultsEl.appendChild(row);
   });
 
-  document.getElementById("result-count").textContent = `${sets.length}게임 생성됨`;
+  const autoCount = resultState.filter(e => e.type === "auto").length;
+  const manualCount = resultState.filter(e => e.type === "manual").length;
+  const parts = [];
+  if (autoCount) parts.push(`자동 ${autoCount}`);
+  if (manualCount) parts.push(`수동 ${manualCount}`);
+  document.getElementById("result-count").textContent = parts.length ? `${parts.join(" · ")}게임` : "-";
 }
 
 function startDraw() {
@@ -736,16 +839,15 @@ function startDraw() {
   btn.classList.add("drawing");
   label.textContent = "추첨 중...";
 
-  const resultsEl = document.getElementById("results");
   let ticks = 0;
   const shuffle = setInterval(() => {
-    const previewSets = Array.from({ length: count }, () => generateOne());
-    renderResults(previewSets);
+    resultState = Array.from({ length: count }, () => ({ numbers: generateOne(), type: "auto" }));
+    renderAllResults();
     ticks++;
     if (ticks >= 6) {
       clearInterval(shuffle);
-      const finalSets = Array.from({ length: count }, () => generateOne());
-      renderResults(finalSets);
+      resultState = Array.from({ length: count }, () => ({ numbers: generateOne(), type: "auto" }));
+      renderAllResults();
       btn.disabled = false;
       btn.classList.remove("drawing");
       label.textContent = "추첨하기";
@@ -753,13 +855,69 @@ function startDraw() {
   }, 90);
 }
 
-document.querySelectorAll(".chip").forEach(chip => {
+document.querySelectorAll(".presets .chip").forEach(chip => {
   chip.addEventListener("click", () => {
-    document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+    document.querySelectorAll(".presets .chip").forEach(c => c.classList.remove("active"));
     chip.classList.add("active");
     document.getElementById("count").value = chip.dataset.count;
   });
 });
+
+/* ---------- Manual selection ---------- */
+const selectedManual = new Set();
+
+function setMode(mode) {
+  document.querySelectorAll(".mode-tab").forEach(t => t.classList.toggle("active", t.dataset.mode === mode));
+  document.getElementById("auto-panel").style.display = mode === "auto" ? "" : "none";
+  document.getElementById("manual-panel").style.display = mode === "manual" ? "" : "none";
+}
+
+function buildManualGrid() {
+  const grid = document.getElementById("manual-grid");
+  grid.innerHTML = "";
+  for (let n = 1; n <= 45; n++) {
+    const el = document.createElement("div");
+    el.className = "mnum";
+    el.textContent = n;
+    el.onclick = () => toggleManualNumber(n, el);
+    grid.appendChild(el);
+  }
+}
+
+function toggleManualNumber(n, el) {
+  if (selectedManual.has(n)) {
+    selectedManual.delete(n);
+    el.classList.remove("selected", ballClass(n));
+  } else {
+    if (selectedManual.size >= 6) return;
+    selectedManual.add(n);
+    el.classList.add("selected", ballClass(n));
+  }
+  updateManualUI();
+}
+
+function updateManualUI() {
+  document.getElementById("manual-count").textContent = `${selectedManual.size} / 6 선택됨`;
+  document.getElementById("manual-add-btn").disabled = selectedManual.size !== 6;
+}
+
+function clearManual() {
+  selectedManual.clear();
+  document.querySelectorAll(".mnum.selected").forEach(el => {
+    el.className = "mnum";
+  });
+  updateManualUI();
+}
+
+function addManualGame() {
+  if (selectedManual.size !== 6) return;
+  const numbers = Array.from(selectedManual).sort((a, b) => a - b);
+  resultState.unshift({ numbers, type: "manual" });
+  renderAllResults();
+  clearManual();
+}
+
+buildManualGrid();
 
 // 실제 동행복권 로또6/45 당첨번호 + 1등 당첨자수/1인당 당첨금 (제1182회~1231회, 2025.07.26~2026.07.04)
 // 출처: 동행복권 공식 추첨 결과, superkts.com 회차별 상세 페이지 (교차 검증 완료)
