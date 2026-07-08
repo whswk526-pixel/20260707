@@ -125,10 +125,22 @@
     margin-bottom: 10px;
   }
   .route-dots { display: flex; flex-direction: column; align-items: center; gap: 3px; padding-top: 2px; }
-  .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; cursor: pointer; transition: box-shadow .15s, transform .15s; }
   .dot.origin { background: var(--accent-blue); }
   .dot.dest { background: var(--gradient-coral); }
+  .dot:hover { transform: scale(1.3); }
+  .dot.armed { animation: dotPulse 1s ease-in-out infinite; }
+  @keyframes dotPulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(0,153,255,0.55); }
+    50% { box-shadow: 0 0 0 5px rgba(0,153,255,0); }
+  }
+  .dot.dest.armed { animation-name: dotPulseCoral; }
+  @keyframes dotPulseCoral {
+    0%,100% { box-shadow: 0 0 0 0 rgba(255,85,119,0.55); }
+    50% { box-shadow: 0 0 0 5px rgba(255,85,119,0); }
+  }
   .dot-line { width: 1px; height: 18px; background: var(--hairline); }
+  .pick-hint { font-size: 10.5px; color: var(--ink-faint); margin: -4px 0 10px 4px; }
   .route-fields { flex: 1; display: flex; flex-direction: column; gap: 8px; }
   .route-fields input {
     width: 100%; background: transparent; border: none; outline: none;
@@ -247,14 +259,26 @@
   }
   #leafletMap { width: 100%; height: 100%; background: var(--surface-1); }
   .map-legend {
-    position: absolute; left: 8px; top: 8px; z-index: 500;
-    display: flex; gap: 6px; pointer-events: none;
+    position: absolute; right: 8px; top: 8px; z-index: 500;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 5px; pointer-events: none;
   }
   .map-legend span {
     font-size: 9.5px; font-weight: 700; padding: 3px 7px; border-radius: var(--r-pill);
-    background: rgba(9,9,9,0.72); color: var(--ink-muted); display: flex; align-items: center; gap: 4px;
+    background: rgba(9,9,9,0.78); color: var(--ink-muted); display: flex; align-items: center; gap: 5px;
+    backdrop-filter: blur(2px);
   }
-  .map-legend .sw { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .map-legend .sw { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+  .map-legend .sw.boundary {
+    width: 12px; height: 0; border-radius: 0; border-top: 1.5px dashed #8a8f9a; background: none;
+  }
+  .map-hint {
+    position: absolute; left: 8px; top: 8px; z-index: 500;
+    font-size: 10px; font-weight: 700; padding: 5px 10px; border-radius: var(--r-pill);
+    background: rgba(0,153,255,0.85); color: #fff; display: none; align-items: center; gap: 5px;
+    animation: pulseHint 1.4s ease-in-out infinite;
+  }
+  .map-hint.show { display: flex; }
+  @keyframes pulseHint { 0%,100% { opacity: 1; } 50% { opacity: 0.65; } }
   .route-via-icon {
     background: rgba(9,9,9,0.85); border-radius: 50%; width: 26px; height: 26px;
     display: flex; align-items: center; justify-content: center; font-size: 13px;
@@ -415,17 +439,18 @@
 
     <div class="route-card">
       <div class="route-dots">
-        <div class="dot origin"></div>
+        <div class="dot origin" id="originDot" onclick="armPicking('origin')" title="눌러서 지도에서 출발지 찍기"></div>
         <div class="dot-line"></div>
-        <div class="dot dest"></div>
+        <div class="dot dest" id="destDot" onclick="armPicking('dest')" title="눌러서 지도에서 도착지 찍기"></div>
       </div>
       <div class="route-fields">
-        <input id="originInput" list="placeList" value="역삼" placeholder="출발지" onchange="onLocationChange()">
-        <input id="destInput" list="placeList" value="강남파이낸스센터" placeholder="도착지" onchange="onLocationChange()">
+        <input id="originInput" list="placeList" value="역삼" placeholder="출발지" onchange="onLocationChange('origin')">
+        <input id="destInput" list="placeList" value="강남파이낸스센터" placeholder="도착지" onchange="onLocationChange('dest')">
       </div>
       <datalist id="placeList"></datalist>
       <button class="swap-btn" onclick="swapLocations()" title="출발지·도착지 바꾸기">⇅</button>
     </div>
+    <div class="pick-hint">📍 출발지·도착지 앞 점을 누르면 지도를 클릭해서 위치를 찍을 수 있어요</div>
 
     <div class="search-box">
       <input id="searchInput" type="text" placeholder="예: 햇빛 피하는 길 알려줘" onkeydown="if(event.key==='Enter') runSearch()">
@@ -456,6 +481,7 @@
     <div class="tab-panel active" id="tab2dPanel">
       <div class="map-box">
         <div class="map-legend" id="mapLegend"></div>
+        <div class="map-hint" id="mapHint"></div>
         <div id="leafletMap"></div>
         <div id="kakaoMap" style="width:100%; height:100%; display:none;"></div>
       </div>
@@ -491,6 +517,9 @@
     // sgis.kostat.go.kr Open API에서 발급받은 값 (배경지도/통계주제도용, 현재 미사용)
     SGIS_CONSUMER_KEY: '',
     SGIS_CONSUMER_SECRET: '',
+    // vworld.kr(국토교통부 공간정보 오픈플랫폼)에서 발급받은 인증키를 넣으면
+    // 실제 3D 건물 지도(Cesium 기반)로 전환됩니다. 비어있으면 현재의 SVG 모식도를 사용합니다.
+    VWORLD_API_KEY: '',
   };
 
   // ==================== 조건 정의 (2개로 축소) ====================
@@ -893,6 +922,32 @@
   let kakaoMap = null, kakaoOverlays = [];
   const usingKakao = !!CONFIG.KAKAO_JS_KEY;
 
+  // ==================== 지도 클릭으로 출발/도착 지정 ====================
+  let customCoords = { origin: null, dest: null };
+  let pickingField = null; // 'origin' | 'dest' | null
+
+  function armPicking(field) {
+    pickingField = pickingField === field ? null : field;
+    document.getElementById('originDot').classList.toggle('armed', pickingField === 'origin');
+    document.getElementById('destDot').classList.toggle('armed', pickingField === 'dest');
+    const hint = document.getElementById('mapHint');
+    if (pickingField) {
+      hint.textContent = `🖱️ 지도를 클릭해 ${pickingField === 'origin' ? '출발지' : '도착지'}를 찍으세요`;
+      hint.classList.add('show');
+      if (currentTab !== '2d') switchTab('2d');
+    } else {
+      hint.classList.remove('show');
+    }
+  }
+  function onMapPointPicked(lat, lng) {
+    if (!pickingField) return;
+    customCoords[pickingField] = { lat, lng };
+    const inputId = pickingField === 'origin' ? 'originInput' : 'destInput';
+    document.getElementById(inputId).value = `📍 지도 선택 (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+    armPicking(pickingField); // 해제
+    render();
+  }
+
   function initMap() {
     if (usingKakao) { loadKakaoMap(); return; }
     leafletMap = L.map('leafletMap', { zoomControl: true, attributionControl: true }).setView([CENTER_LAT, CENTER_LNG], 16);
@@ -903,10 +958,12 @@
     if (DONG_BOUNDARY) {
       for (const dong of DONG_BOUNDARY) {
         for (const ring of dong.rings) {
-          L.polygon(ring, { color: '#0099ff', weight: 1.5, opacity: 0.5, fill: false, dashArray: '4,6' }).addTo(leafletMap);
+          // 경로선(파란/보라)과 헷갈리지 않도록 옅은 회색 실선으로 표시 — 도로가 아니라 행정동 경계임
+          L.polygon(ring, { color: '#8a8f9a', weight: 1, opacity: 0.45, fill: false, dashArray: '1,5' }).addTo(leafletMap);
         }
       }
     }
+    leafletMap.on('click', (e) => onMapPointPicked(e.latlng.lat, e.latlng.lng));
     setTimeout(() => leafletMap.invalidateSize(), 200);
   }
   function loadKakaoMap() {
@@ -925,11 +982,14 @@
               new kakao.maps.Polygon({
                 map: kakaoMap,
                 path: ring.map(([lat, lng]) => new kakao.maps.LatLng(lat, lng)),
-                strokeWeight: 1.5, strokeColor: '#0099ff', strokeOpacity: 0.5, strokeStyle: 'dash', fillOpacity: 0,
+                strokeWeight: 1, strokeColor: '#8a8f9a', strokeOpacity: 0.45, strokeStyle: 'shortdot', fillOpacity: 0,
               });
             }
           }
         }
+        kakao.maps.event.addListener(kakaoMap, 'click', (mouseEvent) => {
+          onMapPointPicked(mouseEvent.latLng.getLat(), mouseEvent.latLng.getLng());
+        });
         if (window.__lastRoutes) renderMapRoutes(window.__lastRoutes);
       });
     };
@@ -977,6 +1037,7 @@
       <span><i class="sw" style="background:${ROUTE_COLORS.fastest}"></i>빠른</span>
       <span><i class="sw" style="background:${ROUTE_COLORS.balanced}"></i>균형</span>
       <span><i class="sw" style="background:${ROUTE_COLORS.optimal}"></i>최적</span>
+      <span><i class="sw boundary"></i>동 경계</span>
     `;
   }
 
@@ -1081,10 +1142,11 @@
     activeConditions = new Set(matched);
     render();
   }
-  function onLocationChange() { render(); }
+  function onLocationChange(field) { if (field) customCoords[field] = null; render(); }
   function swapLocations() {
     const o = document.getElementById('originInput'), d = document.getElementById('destInput');
     const tmp = o.value; o.value = d.value; d.value = tmp;
+    const tmpCoord = customCoords.origin; customCoords.origin = customCoords.dest; customCoords.dest = tmpCoord;
     render();
   }
   function onTimeChange() { computeExposures(); render(); }
@@ -1159,7 +1221,8 @@
 
     const origin = document.getElementById('originInput').value;
     const dest = document.getElementById('destInput').value;
-    const oCoord = findPresetCoord(origin), dCoord = findPresetCoord(dest);
+    const oCoord = customCoords.origin || findPresetCoord(origin);
+    const dCoord = customCoords.dest || findPresetCoord(dest);
     const startId = nearestNodeId(oCoord.lat, oCoord.lng);
     const endId = nearestNodeId(dCoord.lat, dCoord.lng);
 
