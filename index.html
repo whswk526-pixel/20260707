@@ -119,6 +119,19 @@
     padding: 6px 14px;
     letter-spacing: -0.01em;
   }
+  .nav-link {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink);
+    background: var(--surface-1);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-pill);
+    padding: 6px 14px;
+    text-decoration: none;
+    letter-spacing: -0.01em;
+    transition: border-color .15s;
+  }
+  .nav-link:hover { border-color: var(--accent-blue); }
 
   /* ---------- Header ---------- */
   header { padding: var(--sp-xl) 0 var(--sp-xxl); }
@@ -650,7 +663,10 @@
 
   <div class="top-nav">
     <div class="wordmark">LOTTO<span>.</span>GEN</div>
-    <div class="nav-badge" id="clock">--</div>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <a class="nav-link" href="wantroad.html">☀️ WANTROAD</a>
+      <div class="nav-badge" id="clock">--</div>
+    </div>
   </div>
 
   <header>

@@ -1,0 +1,1214 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WANTROAD — 내가 원하는 길을 고르다</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root {
+    --primary: #ffffff;
+    --on-primary: #000000;
+    --accent-blue: #0099ff;
+    --ink: #ffffff;
+    --ink-muted: #999999;
+    --ink-faint: #666666;
+    --canvas: #090909;
+    --surface-1: #141414;
+    --surface-2: #1c1c1c;
+    --surface-3: #242424;
+    --hairline: #262626;
+    --hairline-soft: #1a1a1a;
+    --gradient-magenta: #d44df0;
+    --gradient-violet: #6a4cf5;
+    --gradient-orange: #ff7a3d;
+    --gradient-coral: #ff5577;
+    --success: #22c55e;
+    --warn: #ff7a3d;
+
+    --r-xs: 4px; --r-sm: 6px; --r-md: 10px; --r-lg: 15px;
+    --r-xl: 20px; --r-xxl: 30px; --r-pill: 100px; --r-full: 9999px;
+
+    --sp-xxs: 4px; --sp-xs: 8px; --sp-sm: 12px; --sp-md: 15px;
+    --sp-lg: 20px; --sp-xl: 30px;
+
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    margin: 0;
+    background: #000;
+    overflow-x: hidden;
+  }
+
+  body {
+    color: var(--ink);
+    font-family: "Inter", "Pretendard Variable", "Pretendard", -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    position: relative;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 36px 16px;
+  }
+
+  /* ---------- Ambient atmosphere blobs ---------- */
+  .atmosphere { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+  .blob { position: absolute; border-radius: 50%; filter: blur(100px); opacity: 0.28; }
+  .blob-1 { width: 460px; height: 460px; background: var(--accent-blue); top: -180px; left: -140px; animation: drift1 20s ease-in-out infinite alternate; }
+  .blob-2 { width: 420px; height: 420px; background: var(--gradient-violet); bottom: -160px; right: -120px; opacity: 0.20; animation: drift2 24s ease-in-out infinite alternate; }
+  @keyframes drift1 { from { transform: translate(0,0) scale(1); } to { transform: translate(40px, 30px) scale(1.08); } }
+  @keyframes drift2 { from { transform: translate(0,0) scale(1); } to { transform: translate(-30px, -20px) scale(1.1); } }
+
+  /* ---------- Phone frame ---------- */
+  .phone-frame {
+    position: relative;
+    z-index: 1;
+    width: 390px;
+    max-width: 100%;
+    height: 844px;
+    max-height: 92vh;
+    background: var(--canvas);
+    border-radius: 44px;
+    border: 8px solid #000;
+    box-shadow: 0 0 0 1.5px rgba(255,255,255,0.08), 0 40px 80px rgba(0,0,0,0.6);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .phone-notch {
+    position: absolute;
+    top: 14px; left: 50%; transform: translateX(-50%);
+    width: 110px; height: 22px;
+    background: #000;
+    border-radius: var(--r-pill);
+    z-index: 5;
+  }
+  .app-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 46px 18px 28px;
+    scrollbar-width: none;
+  }
+  .app-content::-webkit-scrollbar { display: none; }
+
+  /* ---------- Top nav ---------- */
+  .top-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+  .wordmark { display: flex; align-items: baseline; gap: 6px; }
+  .wordmark .mark { font-size: 20px; font-weight: 800; letter-spacing: -0.6px; }
+  .wordmark .mark .accent { color: var(--accent-blue); }
+  .slogan { font-size: 11px; color: var(--ink-muted); font-weight: 500; }
+  .bus-toggle-btn {
+    display: flex; align-items: center; gap: 5px;
+    background: var(--surface-1); color: var(--ink);
+    border: 1px solid var(--hairline); border-radius: var(--r-pill);
+    padding: 7px 12px; font-size: 12px; font-weight: 600;
+    cursor: pointer; transition: background .15s, border-color .15s;
+  }
+  .bus-toggle-btn.active { background: rgba(0,153,255,0.15); border-color: var(--accent-blue); color: var(--accent-blue); }
+
+  /* ---------- Route input card ---------- */
+  .route-card {
+    background: var(--surface-1);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .route-dots { display: flex; flex-direction: column; align-items: center; gap: 3px; padding-top: 2px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .dot.origin { background: var(--accent-blue); }
+  .dot.dest { background: var(--gradient-coral); }
+  .dot-line { width: 1px; height: 18px; background: var(--hairline); }
+  .route-fields { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+  .route-fields input {
+    width: 100%; background: transparent; border: none; outline: none;
+    color: var(--ink); font-family: inherit; font-size: 14px; font-weight: 500;
+    padding: 2px 0; border-bottom: 1px solid transparent;
+  }
+  .route-fields input::placeholder { color: var(--ink-faint); }
+  .swap-btn {
+    width: 32px; height: 32px; border-radius: var(--r-full);
+    background: var(--surface-2); border: 1px solid var(--hairline);
+    color: var(--ink-muted); display: flex; align-items: center; justify-content: center;
+    cursor: pointer; font-size: 13px; flex-shrink: 0;
+  }
+  .swap-btn:hover { color: var(--ink); }
+
+  /* ---------- Search box ---------- */
+  .search-box {
+    position: relative;
+    margin-bottom: 14px;
+  }
+  .search-box input {
+    width: 100%;
+    background: var(--surface-1);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    color: var(--ink);
+    font-family: inherit;
+    font-size: 13.5px;
+    padding: 12px 40px 12px 14px;
+    outline: none;
+    transition: box-shadow .15s, border-color .15s;
+  }
+  .search-box input:focus { border-color: var(--accent-blue); box-shadow: 0 0 0 3px rgba(0,153,255,0.15); }
+  .search-box input::placeholder { color: var(--ink-faint); }
+  .search-icon {
+    position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+    font-size: 15px; opacity: 0.6; pointer-events: none;
+  }
+
+  /* ---------- Condition chips ---------- */
+  .chip-row {
+    display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 16px;
+    scrollbar-width: none;
+  }
+  .chip-row::-webkit-scrollbar { display: none; }
+  .chip {
+    flex-shrink: 0;
+    display: flex; align-items: center; gap: 6px;
+    background: var(--surface-1); border: 1px solid var(--hairline);
+    color: var(--ink-muted);
+    border-radius: var(--r-pill);
+    padding: 8px 13px;
+    font-size: 12.5px; font-weight: 600;
+    cursor: pointer;
+    transition: all .15s;
+    white-space: nowrap;
+  }
+  .chip:hover { color: var(--ink); }
+  .chip.active {
+    background: var(--ink); color: var(--on-primary); border-color: var(--ink);
+  }
+  .chip-check {
+    width: 13px; height: 13px; border-radius: 4px;
+    border: 1.5px solid var(--ink-muted);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 900; color: transparent;
+    flex-shrink: 0;
+  }
+  .chip.active .chip-check {
+    background: var(--accent-blue); border-color: var(--accent-blue); color: #fff;
+  }
+
+  /* ---------- Bus panel ---------- */
+  .bus-panel {
+    background: var(--surface-1);
+    border: 1px solid var(--hairline-soft);
+    border-radius: var(--r-lg);
+    padding: 14px;
+    margin-bottom: 16px;
+    display: none;
+  }
+  .bus-panel.open { display: block; }
+  .bus-panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .bus-panel-title { font-size: 13px; font-weight: 700; }
+  .speed-seg { display: flex; background: var(--surface-2); border-radius: var(--r-pill); padding: 3px; }
+  .speed-seg button {
+    border: none; background: transparent; color: var(--ink-muted);
+    font-family: inherit; font-size: 11px; font-weight: 600;
+    padding: 5px 10px; border-radius: var(--r-pill); cursor: pointer;
+  }
+  .speed-seg button.active { background: var(--ink); color: var(--on-primary); }
+  .bus-stop-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 0; border-top: 1px solid var(--hairline-soft);
+    font-size: 12.5px;
+  }
+  .bus-stop-row:first-of-type { border-top: none; }
+  .bus-stop-name { display: flex; align-items: center; gap: 7px; font-weight: 600; }
+  .bus-stop-meta { color: var(--ink-muted); font-size: 11.5px; }
+  .bus-chance {
+    font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: var(--r-pill);
+  }
+  .bus-chance.high { background: rgba(34,197,94,0.15); color: var(--success); }
+  .bus-chance.mid { background: rgba(255,122,61,0.15); color: var(--gradient-orange); }
+  .bus-chance.low { background: rgba(255,85,119,0.15); color: var(--gradient-coral); }
+
+  /* ---------- Real map (Leaflet) ---------- */
+  .map-box {
+    position: relative;
+    background: var(--surface-1);
+    border: 1px solid var(--hairline-soft);
+    border-radius: var(--r-lg);
+    height: 220px;
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+  #leafletMap { width: 100%; height: 100%; background: var(--surface-1); }
+  .map-legend {
+    position: absolute; left: 8px; top: 8px; z-index: 500;
+    display: flex; gap: 6px; pointer-events: none;
+  }
+  .map-legend span {
+    font-size: 9.5px; font-weight: 700; padding: 3px 7px; border-radius: var(--r-pill);
+    background: rgba(9,9,9,0.72); color: var(--ink-muted); display: flex; align-items: center; gap: 4px;
+  }
+  .map-legend .sw { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .route-via-icon {
+    background: rgba(9,9,9,0.85); border-radius: 50%; width: 26px; height: 26px;
+    display: flex; align-items: center; justify-content: center; font-size: 13px;
+    border: 1.5px solid var(--accent-blue);
+  }
+  .leaflet-control-attribution {
+    background: rgba(9,9,9,0.7) !important; color: var(--ink-faint) !important;
+    font-size: 8.5px !important; padding: 1px 5px !important;
+  }
+  .leaflet-control-attribution a { color: var(--ink-muted) !important; }
+  .leaflet-control-zoom a {
+    background: var(--surface-1) !important; color: var(--ink) !important;
+    border-color: var(--hairline) !important;
+  }
+  .leaflet-control-zoom { border: none !important; box-shadow: none !important; }
+
+  /* ---------- 월/시각 선택 ---------- */
+  .time-row {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 10px;
+  }
+  .time-row label {
+    font-size: 11px; color: var(--ink-muted); font-weight: 600;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .time-row select {
+    background: var(--surface-1); color: var(--ink);
+    border: 1px solid var(--hairline); border-radius: var(--r-md);
+    font-family: inherit; font-size: 12.5px; font-weight: 600;
+    padding: 7px 8px; outline: none;
+  }
+  .time-row select:focus { border-color: var(--accent-blue); }
+  .night-note {
+    font-size: 11px; color: var(--ink-muted); background: var(--surface-1);
+    border: 1px solid var(--hairline-soft); border-radius: var(--r-md);
+    padding: 7px 10px; margin-bottom: 10px; display: none;
+  }
+  .night-note.show { display: block; }
+
+  /* ---------- 2D/3D 탭 ---------- */
+  .tab-row { display: flex; gap: 6px; margin-bottom: 8px; }
+  .tab-btn {
+    flex: 1; text-align: center; cursor: pointer;
+    background: var(--surface-1); color: var(--ink-muted);
+    border: 1px solid var(--hairline); border-radius: var(--r-pill);
+    padding: 7px 0; font-size: 12px; font-weight: 700;
+    transition: all .15s;
+  }
+  .tab-btn.active { background: var(--ink); color: var(--on-primary); border-color: var(--ink); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ---------- 태양-건물 모식도 (3D) ---------- */
+  .diagram-box {
+    position: relative;
+    background: var(--surface-1);
+    border: 1px solid var(--hairline-soft);
+    border-radius: var(--r-lg);
+    height: 220px;
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+  .diagram-box svg { width: 100%; height: 100%; display: block; }
+  .diagram-caption {
+    position: absolute; left: 8px; bottom: 6px; z-index: 5;
+    font-size: 9.5px; font-weight: 700; color: var(--ink-muted);
+    background: rgba(9,9,9,0.72); padding: 3px 7px; border-radius: var(--r-pill);
+    pointer-events: none;
+  }
+
+  /* ---------- Section heading ---------- */
+  .section-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .section-head h2 { font-size: 15px; font-weight: 700; margin: 0; }
+  .section-head .mode-tag { font-size: 11px; color: var(--accent-blue); font-weight: 600; }
+
+  /* ---------- Route result cards ---------- */
+  .results { display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px; }
+  .result-card {
+    background: var(--surface-1);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    padding: 14px;
+    position: relative;
+    transition: border-color .15s;
+  }
+  .result-card.recommended {
+    border-color: var(--accent-blue);
+    background: linear-gradient(180deg, rgba(0,153,255,0.08), rgba(0,153,255,0.02));
+  }
+  .result-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .badge {
+    font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: var(--r-pill);
+    background: var(--surface-2); color: var(--ink-muted);
+  }
+  .badge.rec { background: var(--accent-blue); color: #fff; }
+  .time-block { display: flex; align-items: baseline; gap: 6px; }
+  .time-block .num { font-size: 24px; font-weight: 800; letter-spacing: -0.5px; }
+  .time-block .unit { font-size: 12px; color: var(--ink-muted); font-weight: 600; }
+  .time-delta { font-size: 11.5px; font-weight: 700; }
+  .time-delta.plus { color: var(--gradient-orange); }
+  .time-delta.zero { color: var(--ink-muted); }
+  .insight { font-size: 12.5px; color: var(--ink); line-height: 1.5; margin: 6px 0 10px; }
+  .insight b { color: var(--accent-blue); font-weight: 700; }
+
+  .stat-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+  .stat-chip {
+    display: flex; align-items: center; gap: 4px;
+    background: var(--surface-2); border: 1px solid transparent;
+    border-radius: var(--r-sm); padding: 4px 8px;
+    font-size: 11px; color: var(--ink-muted); font-weight: 600;
+  }
+  .stat-chip.key { border-color: var(--accent-blue); color: var(--ink); background: rgba(0,153,255,0.10); }
+
+  .route-bus-line {
+    margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--hairline-soft);
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 11.5px; color: var(--ink-muted);
+  }
+
+  /* ---------- Footer note ---------- */
+  .footnote {
+    font-size: 10.5px; color: var(--ink-faint); line-height: 1.6;
+    padding-top: 6px; border-top: 1px solid var(--hairline-soft);
+  }
+
+  @media (max-width: 420px) {
+    body { padding: 0; align-items: stretch; }
+    .phone-frame { width: 100%; height: 100vh; max-height: 100vh; border-radius: 0; border: none; }
+    .phone-notch { display: none; }
+    .app-content { padding-top: 20px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="atmosphere">
+  <div class="blob blob-1"></div>
+  <div class="blob blob-2"></div>
+</div>
+
+<div class="phone-frame">
+  <div class="phone-notch"></div>
+  <div class="app-content">
+
+    <div class="top-nav">
+      <div class="wordmark">
+        <span class="mark">WANT<span class="accent">ROAD</span></span>
+      </div>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <a class="bus-toggle-btn" href="index.html" style="text-decoration:none;">🎲 LOTTO</a>
+        <button class="bus-toggle-btn" id="busToggleBtn" onclick="toggleBusPanel()">🚌 버스 도우미</button>
+      </div>
+    </div>
+    <div class="slogan" style="margin-bottom:16px;">내가 원하는 길을 고르다</div>
+
+    <div class="route-card">
+      <div class="route-dots">
+        <div class="dot origin"></div>
+        <div class="dot-line"></div>
+        <div class="dot dest"></div>
+      </div>
+      <div class="route-fields">
+        <input id="originInput" list="placeList" value="역삼" placeholder="출발지" onchange="onLocationChange()">
+        <input id="destInput" list="placeList" value="강남파이낸스센터" placeholder="도착지" onchange="onLocationChange()">
+      </div>
+      <datalist id="placeList"></datalist>
+      <button class="swap-btn" onclick="swapLocations()" title="출발지·도착지 바꾸기">⇅</button>
+    </div>
+
+    <div class="search-box">
+      <input id="searchInput" type="text" placeholder="예: 햇빛 피하는 길 알려줘" onkeydown="if(event.key==='Enter') runSearch()">
+      <span class="search-icon">🔍</span>
+    </div>
+
+    <div class="chip-row" id="chipRow"></div>
+
+    <div class="time-row">
+      <label>📅 <select id="monthSelect" onchange="onTimeChange()"></select></label>
+      <label>🕐 <select id="hourSelect" onchange="onTimeChange()"></select></label>
+    </div>
+    <div class="night-note" id="nightNote">🌙 이 시각엔 해가 떠 있지 않아 햇빛 계산이 적용되지 않아요 (비 피하기만 반영돼요).</div>
+
+    <div class="bus-panel" id="busPanel">
+      <div class="bus-panel-head">
+        <div class="bus-panel-title">🚌 이 속도로 버스 탈 수 있을까?</div>
+        <div class="speed-seg" id="speedSeg"></div>
+      </div>
+      <div id="busStopList"></div>
+    </div>
+
+    <div class="tab-row">
+      <div class="tab-btn active" id="tab2dBtn" onclick="switchTab('2d')">🗺️ 2D 지도</div>
+      <div class="tab-btn" id="tab3dBtn" onclick="switchTab('3d')">🏙️ 3D 모식도</div>
+    </div>
+
+    <div class="tab-panel active" id="tab2dPanel">
+      <div class="map-box">
+        <div class="map-legend" id="mapLegend"></div>
+        <div id="leafletMap"></div>
+        <div id="kakaoMap" style="width:100%; height:100%; display:none;"></div>
+      </div>
+    </div>
+    <div class="tab-panel" id="tab3dPanel">
+      <div class="diagram-box">
+        <div id="sunDiagram"></div>
+        <div class="diagram-caption" id="diagramCaption">건물·태양 위치 모식도</div>
+      </div>
+    </div>
+
+    <div class="section-head">
+      <h2>추천 경로</h2>
+      <span class="mode-tag" id="modeTag">균형 추천</span>
+    </div>
+
+    <div class="results" id="resultsBox"></div>
+
+    <div class="footnote">
+      * 보행로·건물 높이: OpenStreetMap(Overpass API). 동 경계: SGIS(통계지리정보서비스) 행정동 경계 shapefile을 직접 좌표변환. 태양 방위각·고도: NOAA/SunCalc 공식(월/시각 입력값으로 실시간 계산). 월별 일조시간 평년값: 기상청 기후평년값(1991~2020, 서울). 비 노출은 실측 강수 데이터가 아니라 건물·지하도 근접도 기반 추정치입니다.
+    </div>
+
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  // ==================== 설정 ====================
+  // developers.kakao.com 에서 발급받은 JavaScript 키를 넣으면 카카오맵으로 전환됩니다.
+  // 비어있으면 키 없이 되는 Leaflet+OSM/Carto 지도를 그대로 사용합니다.
+  const CONFIG = {
+    KAKAO_JS_KEY: '',
+    // sgis.kostat.go.kr Open API에서 발급받은 값 (배경지도/통계주제도용, 현재 미사용)
+    SGIS_CONSUMER_KEY: '',
+    SGIS_CONSUMER_SECRET: '',
+  };
+
+  // ==================== 조건 정의 (2개로 축소) ====================
+  const CONDITIONS = [
+    { id: 'sun',  label: '일조량 피하기', icon: '☀️', keywords: ['햇빛', '일조', '더위', '땀', '그늘', '자외선'] },
+    { id: 'rain', label: '비 피하기',    icon: '🌧️', keywords: ['비', '우산', '장마', '젖', '강수'] },
+  ];
+  let activeConditions = new Set(['sun']); // 기본값: 햇빛만 ON
+  let busPanelOpen = false;
+  let speedLevel = '보통';
+  let currentTab = '2d';
+  let selectedRouteKey = 'optimal';
+
+  // ==================== 기상청 서울 월별 일조시간 평년값 (1991~2020, 단위: 월간 총 시간) ====================
+  // 출처: 기상청 기후평년값. 1월~12월 순서.
+  const KMA_MONTHLY_SUNSHINE_HOURS = [169.6, 170.8, 198.2, 206.3, 223.0, 189.1, 123.6, 156.1, 179.7, 206.5, 157.3, 162.9];
+
+  // ==================== 태양 위치 계산 (NOAA/SunCalc 방식 공식) ====================
+  const RAD = Math.PI / 180;
+  const DAY_MS = 1000 * 60 * 60 * 24;
+  const J1970 = 2440588, J2000 = 2451545;
+  const OBLIQUITY = RAD * 23.4397;
+
+  function toJulian(date) { return date.valueOf() / DAY_MS - 0.5 + J1970; }
+  function toDays(date) { return toJulian(date) - J2000; }
+  function rightAscension(l, b) { return Math.atan2(Math.sin(l) * Math.cos(OBLIQUITY) - Math.tan(b) * Math.sin(OBLIQUITY), Math.cos(l)); }
+  function declination(l, b) { return Math.asin(Math.sin(b) * Math.cos(OBLIQUITY) + Math.cos(b) * Math.sin(OBLIQUITY) * Math.sin(l)); }
+  function solarMeanAnomaly(d) { return RAD * (357.5291 + 0.98560028 * d); }
+  function eclipticLongitude(M) {
+    const C = RAD * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M));
+    const P = RAD * 102.9372;
+    return M + C + P + Math.PI;
+  }
+  function sunCoords(d) {
+    const M = solarMeanAnomaly(d);
+    const L = eclipticLongitude(M);
+    return { dec: declination(L, 0), ra: rightAscension(L, 0) };
+  }
+  function siderealTime(d, lw) { return RAD * (280.16 + 360.9856235 * d) - lw; }
+  function azimuthRad(H, phi, dec) { return Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(phi) - Math.tan(dec) * Math.cos(phi)); }
+  function altitudeRad(H, phi, dec) { return Math.asin(Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(H)); }
+
+  // 방위각은 나침반 기준(0=북, 90=동, 180=남, 270=서, 시계방향)으로 변환해서 반환
+  function getSolarPosition(date, lat, lng) {
+    const lw = -lng * RAD, phi = lat * RAD, d = toDays(date);
+    const c = sunCoords(d);
+    const H = siderealTime(d, lw) - c.ra;
+    const alt = altitudeRad(H, phi, c.dec);
+    const azFromSouthDeg = azimuthRad(H, phi, c.dec) * 180 / Math.PI;
+    const azCompassDeg = (azFromSouthDeg + 180 + 360) % 360;
+    return { azimuth: azCompassDeg, altitude: alt * 180 / Math.PI };
+  }
+  function computeDayLengthHours(date, lat) {
+    const d = toDays(date);
+    const c = sunCoords(d);
+    const phi = lat * RAD;
+    const cosH0 = -Math.tan(phi) * Math.tan(c.dec);
+    if (cosH0 <= -1) return 24;
+    if (cosH0 >= 1) return 0;
+    return (2 * Math.acos(cosH0) * 12) / Math.PI;
+  }
+
+  // ==================== geo 헬퍼 ====================
+  function haversine(a, b) {
+    const R = 6378137;
+    const dLat = (b.lat - a.lat) * Math.PI / 180, dLng = (b.lng - a.lng) * Math.PI / 180;
+    const la1 = a.lat * Math.PI / 180, la2 = b.lat * Math.PI / 180;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+  function offsetLatLng(lat, lng, bearingDeg, distMeters) {
+    const R = 6378137;
+    const bearing = bearingDeg * Math.PI / 180;
+    const dLat = (distMeters * Math.cos(bearing)) / R;
+    const dLng = (distMeters * Math.sin(bearing)) / (R * Math.cos(lat * Math.PI / 180));
+    return [lat + dLat * 180 / Math.PI, lng + dLng * 180 / Math.PI];
+  }
+
+  // ==================== 그림자/건물 기하 (convex hull + point-in-polygon) ====================
+  function convexHull(points) {
+    const pts = points.map((p) => [p[1], p[0]]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    if (pts.length < 3) return points;
+    const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const lower = [];
+    for (const p of pts) {
+      while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+      lower.push(p);
+    }
+    const upper = [];
+    for (let i = pts.length - 1; i >= 0; i--) {
+      const p = pts[i];
+      while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+      upper.push(p);
+    }
+    upper.pop(); lower.pop();
+    return lower.concat(upper).map(([lng, lat]) => [lat, lng]);
+  }
+  function pointInPolygon(pt, poly) {
+    if (!poly || poly.length < 3) return false;
+    const x = pt.lng, y = pt.lat;
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const xi = poly[i][1], yi = poly[i][0];
+      const xj = poly[j][1], yj = poly[j][0];
+      const intersect = (yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+  function buildShadowPolygon(building, azimuthDeg, altitudeDeg) {
+    const altRad = altitudeDeg * Math.PI / 180;
+    const L = Math.min(building.heightM / Math.tan(altRad), 150);
+    const theta = (azimuthDeg + 180) % 360;
+    const translated = building.footprint.map(([lat, lng]) => offsetLatLng(lat, lng, theta, L));
+    return convexHull(building.footprint.concat(translated));
+  }
+  function pointToSegmentMeters(p, a, b) {
+    const mPerDegLat = 110540, mPerDegLng = 111320 * Math.cos(p.lat * Math.PI / 180);
+    const toXY = (q) => [(q[1] - p.lng) * mPerDegLng, (q[0] - p.lat) * mPerDegLat];
+    const A = toXY(a), B = toXY(b);
+    const ABx = B[0] - A[0], ABy = B[1] - A[1];
+    const t = (-A[0] * ABx + -A[1] * ABy) / (ABx * ABx + ABy * ABy || 1);
+    const tc = Math.max(0, Math.min(1, t));
+    const cx = A[0] + ABx * tc, cy = A[1] + ABy * tc;
+    return Math.hypot(cx, cy);
+  }
+  function distanceToPolygonEdge(pt, footprint) {
+    let minD = Infinity;
+    for (let i = 0; i < footprint.length; i++) {
+      const a = footprint[i], b = footprint[(i + 1) % footprint.length];
+      const d = pointToSegmentMeters(pt, a, b);
+      if (d < minD) minD = d;
+    }
+    return minD;
+  }
+
+  // ==================== 공간 그리드 인덱스 (건물 후보 빠르게 찾기) ====================
+  const GRID_CELL_DEG = 0.0009; // 약 100m
+  let BUILD_GRID = null;
+  function cellKey(lat, lng) { return Math.floor(lat / GRID_CELL_DEG) + ',' + Math.floor(lng / GRID_CELL_DEG); }
+  function buildGrid(buildings) {
+    const grid = new Map();
+    const bufDeg = 150 / 100000; // 최대 그림자 길이(150m) 안전 버퍼
+    buildings.forEach((b, idx) => {
+      let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+      for (const [lat, lng] of b.footprint) {
+        minLat = Math.min(minLat, lat); maxLat = Math.max(maxLat, lat);
+        minLng = Math.min(minLng, lng); maxLng = Math.max(maxLng, lng);
+      }
+      const cx0 = Math.floor((minLat - bufDeg) / GRID_CELL_DEG), cx1 = Math.floor((maxLat + bufDeg) / GRID_CELL_DEG);
+      const cy0 = Math.floor((minLng - bufDeg) / GRID_CELL_DEG), cy1 = Math.floor((maxLng + bufDeg) / GRID_CELL_DEG);
+      for (let cx = cx0; cx <= cx1; cx++) {
+        for (let cy = cy0; cy <= cy1; cy++) {
+          const k = cx + ',' + cy;
+          if (!grid.has(k)) grid.set(k, []);
+          grid.get(k).push(idx);
+        }
+      }
+    });
+    return grid;
+  }
+  function queryGrid(lat, lng) { return BUILD_GRID.get(cellKey(lat, lng)) || []; }
+
+  // ==================== 데이터 로딩 ====================
+  let GRAPH = null, BUILDINGS = null, PRESETS = null, DONG_BOUNDARY = null, ADJ = null;
+  const CENTER_LAT = 37.500, CENTER_LNG = 127.0365;
+  const WALK_SPEED_MPS = 1.25;
+
+  // graph.edges[].from/to는 JSON에서 숫자로 오지만 GRAPH.nodes 키(및 Map 기반 순회)는
+  // 전부 문자열이라, 여기서 문자열로 통일하지 않으면 Map.get이 매번 못 찾는다.
+  function buildAdjacency(graph) {
+    const adj = new Map();
+    graph.edges.forEach((e, idx) => {
+      const from = String(e.from), to = String(e.to);
+      if (!adj.has(from)) adj.set(from, []);
+      if (!adj.has(to)) adj.set(to, []);
+      adj.get(from).push({ to, idx });
+      adj.get(to).push({ to: from, idx });
+    });
+    return adj;
+  }
+
+  function displayName(p) {
+    return p.kind === 'station' && !/역$|출구$/.test(p.name) ? p.name + '역' : p.name;
+  }
+  function findPresetCoord(name) {
+    const trimmed = (name || '').trim();
+    const p = PRESETS.find((x) => displayName(x) === trimmed) || PRESETS[0];
+    return { lat: p.lat, lng: p.lng };
+  }
+  function nearestNodeId(lat, lng) {
+    let best = null, bestD = Infinity;
+    for (const id in GRAPH.nodes) {
+      const n = GRAPH.nodes[id];
+      const d = haversine({ lat, lng }, n);
+      if (d < bestD) { bestD = d; best = id; }
+    }
+    return best;
+  }
+
+  // ==================== 노출도 계산 (월/시각이 바뀔 때만 재계산) ====================
+  let EDGE_META = [];
+  let SUN_STATE = null;
+
+  function getSelectedDateTime() {
+    const year = new Date().getFullYear();
+    const mm = String(selectedMonth()).padStart(2, '0');
+    const hh = String(selectedHour()).padStart(2, '0');
+    return new Date(`${year}-${mm}-15T${hh}:00:00+09:00`);
+  }
+  function selectedMonth() { return parseInt(document.getElementById('monthSelect').value, 10); }
+  function selectedHour() { return parseInt(document.getElementById('hourSelect').value, 10); }
+
+  function computeMonthSunProbability(dt) {
+    const dayLenH = computeDayLengthHours(dt, CENTER_LAT);
+    if (dayLenH <= 0) return 0;
+    const mm = selectedMonth();
+    const daysInMonth = new Date(dt.getFullYear(), mm, 0).getDate();
+    const avgDailyH = KMA_MONTHLY_SUNSHINE_HOURS[mm - 1] / daysInMonth;
+    return Math.max(0.1, Math.min(1, avgDailyH / dayLenH));
+  }
+
+  function computeExposures() {
+    const dt = getSelectedDateTime();
+    const pos = getSolarPosition(dt, CENTER_LAT, CENTER_LNG);
+    const isDaytime = pos.altitude > 0;
+    const monthProb = isDaytime ? computeMonthSunProbability(dt) : 0;
+    SUN_STATE = { azimuth: pos.azimuth, altitude: pos.altitude, isDaytime, monthProb, dt };
+
+    let shadowPolys = null;
+    if (isDaytime) {
+      shadowPolys = BUILDINGS.map((b) => buildShadowPolygon(b, pos.azimuth, pos.altitude));
+    }
+
+    EDGE_META = GRAPH.edges.map((e) => {
+      if (e.tunnel || e.covered) return { sunExposure: 0, rainExposure: 0 };
+      const a = GRAPH.nodes[e.from], b = GRAPH.nodes[e.to];
+      const samples = [0, 0.5, 1].map((t) => ({ lat: a.lat + (b.lat - a.lat) * t, lng: a.lng + (b.lng - a.lng) * t }));
+
+      let sunExposure = 0;
+      if (isDaytime) {
+        let shadedCount = 0;
+        for (const p of samples) {
+          const cands = queryGrid(p.lat, p.lng);
+          if (cands.some((bi) => pointInPolygon(p, shadowPolys[bi]))) shadedCount++;
+        }
+        sunExposure = 1 - shadedCount / samples.length;
+      }
+
+      let rainTotal = 0;
+      for (const p of samples) {
+        const cands = queryGrid(p.lat, p.lng);
+        let minDist = Infinity;
+        for (const bi of cands) {
+          const d = distanceToPolygonEdge(p, BUILDINGS[bi].footprint);
+          if (d < minDist) minDist = d;
+        }
+        const exposure = minDist === Infinity ? 1 : Math.max(0, Math.min(1, (minDist - 3) / (15 - 3)));
+        rainTotal += exposure;
+      }
+      const rainExposure = rainTotal / samples.length;
+
+      return { sunExposure, rainExposure };
+    });
+  }
+
+  function combinedExposureForIdx(idx) {
+    const meta = EDGE_META[idx];
+    const sunOn = activeConditions.has('sun');
+    const rainOn = activeConditions.has('rain');
+    const sunPart = sunOn ? meta.sunExposure * (SUN_STATE.isDaytime ? SUN_STATE.monthProb : 0) : 0;
+    const rainPart = rainOn ? meta.rainExposure : 0;
+    if (sunOn && rainOn) return 0.5 * sunPart + 0.5 * rainPart;
+    return sunOn ? sunPart : rainOn ? rainPart : 0;
+  }
+
+  // ==================== Dijkstra ====================
+  function dijkstra(startId, endId, weightFn) {
+    const dist = new Map(), prevNode = new Map(), prevEdge = new Map(), visited = new Set();
+    for (const id in GRAPH.nodes) dist.set(id, Infinity);
+    dist.set(startId, 0);
+    while (true) {
+      let u = null, best = Infinity;
+      for (const [id, d] of dist) { if (!visited.has(id) && d < best) { best = d; u = id; } }
+      if (u === null || u === endId) break;
+      visited.add(u);
+      for (const { to, idx } of ADJ.get(u) || []) {
+        if (visited.has(to)) continue;
+        const nd = dist.get(u) + weightFn(idx);
+        if (nd < dist.get(to)) { dist.set(to, nd); prevNode.set(to, u); prevEdge.set(to, idx); }
+      }
+    }
+    if (dist.get(endId) === Infinity) return null;
+    const nodePath = [endId], edgePath = [];
+    let cur = endId;
+    while (cur !== startId) {
+      edgePath.push(prevEdge.get(cur));
+      cur = prevNode.get(cur);
+      nodePath.push(cur);
+    }
+    nodePath.reverse(); edgePath.reverse();
+    return { nodePath, edgePath };
+  }
+  function pathDistance(edgePath) { return edgePath.reduce((s, idx) => s + GRAPH.edges[idx].distanceM, 0); }
+  function pathAvgExposure(edgePath) {
+    const dist = pathDistance(edgePath) || 1;
+    let sun = 0, rain = 0;
+    for (const idx of edgePath) {
+      const w = GRAPH.edges[idx].distanceM / dist;
+      sun += EDGE_META[idx].sunExposure * w;
+      rain += EDGE_META[idx].rainExposure * w;
+    }
+    return { sun, rain };
+  }
+  function routeInfo(edgePath, nodePath) {
+    const distanceM = pathDistance(edgePath);
+    return {
+      nodePath, edgePath, distanceM,
+      time: Math.max(1, Math.round(distanceM / WALK_SPEED_MPS / 60)),
+      ...pathAvgExposure(edgePath),
+    };
+  }
+
+  function computeThreeRoutes(startId, endId) {
+    const fastestRun = dijkstra(startId, endId, (idx) => GRAPH.edges[idx].distanceM);
+    if (!fastestRun) return null;
+    const fastest = routeInfo(fastestRun.edgePath, fastestRun.nodePath);
+
+    const noCondition = !activeConditions.has('sun') && !activeConditions.has('rain');
+    if (noCondition) return { fastest, balanced: fastest, optimal: fastest };
+
+    const balancedRun = dijkstra(startId, endId, (idx) => GRAPH.edges[idx].distanceM * (1 + combinedExposureForIdx(idx) * 1.4));
+    const balanced = balancedRun ? routeInfo(balancedRun.edgePath, balancedRun.nodePath) : fastest;
+
+    const candidates = [3.0, 2.2, 1.6, 1.0];
+    let optimal = balanced;
+    for (const m of candidates) {
+      const run = dijkstra(startId, endId, (idx) => GRAPH.edges[idx].distanceM * (1 + combinedExposureForIdx(idx) * m));
+      if (!run) continue;
+      const info = routeInfo(run.edgePath, run.nodePath);
+      if (info.distanceM / fastest.distanceM <= 1.45) { optimal = info; break; }
+    }
+    return { fastest, balanced, optimal };
+  }
+
+  // ==================== 버스 도우미 (기존 mock 유지) ====================
+  function hashStr(str) {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+  function seededRand(seedStr) {
+    let s = hashStr(seedStr);
+    return function () { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  }
+  function range(rand, min, max) { return Math.round(min + rand() * (max - min)); }
+  function generateBusStops(origin, dest) {
+    const rand = seededRand('bus:' + origin + '→' + dest);
+    return ['A정류장', 'B정류장', 'C정류장'].map((name) => ({ name, walkBase: range(rand, 2, 8), busArrival: range(rand, 3, 10) }));
+  }
+  const SPEED_MULT = { 느림: 1.3, 보통: 1.0, 빠름: 0.72 };
+  function busChanceLabel(margin) {
+    if (margin >= 2) return { label: '가능성 높음', cls: 'high' };
+    if (margin >= 0) return { label: '아슬아슬', cls: 'mid' };
+    return { label: '놓칠 가능성 높음', cls: 'low' };
+  }
+  function toggleBusPanel() {
+    busPanelOpen = !busPanelOpen;
+    document.getElementById('busPanel').classList.toggle('open', busPanelOpen);
+    document.getElementById('busToggleBtn').classList.toggle('active', busPanelOpen);
+    renderBusPanel();
+  }
+  function renderBusPanel() {
+    if (!busPanelOpen) return;
+    document.getElementById('speedSeg').innerHTML = Object.keys(SPEED_MULT).map((s) => `<button class="${s === speedLevel ? 'active' : ''}" onclick="setSpeed('${s}')">${s}</button>`).join('');
+    const origin = document.getElementById('originInput').value || '출발지';
+    const dest = document.getElementById('destInput').value || '도착지';
+    const withMargin = generateBusStops(origin, dest).map((s) => {
+      const walk = Math.max(1, Math.round(s.walkBase * SPEED_MULT[speedLevel]));
+      const margin = s.busArrival - walk;
+      return { ...s, walk, margin, chance: busChanceLabel(margin) };
+    });
+    let best = withMargin[0];
+    withMargin.forEach((s) => { if (s.chance.cls === 'high' && (best.chance.cls !== 'high' || s.margin > best.margin)) best = s; });
+    document.getElementById('busStopList').innerHTML = withMargin.map((s) => `
+      <div class="bus-stop-row">
+        <div>
+          <div class="bus-stop-name">${s.name} ${s === best ? '⭐' : ''}</div>
+          <div class="bus-stop-meta">도보 ${s.walk}분 · 버스 ${s.busArrival}분 후 도착</div>
+        </div>
+        <div class="bus-chance ${s.chance.cls}">${s.chance.label}</div>
+      </div>
+    `).join('');
+  }
+  function setSpeed(s) { speedLevel = s; renderBusPanel(); }
+
+  // ==================== 지도 (Leaflet 기본, 키 있으면 카카오맵) ====================
+  const ROUTE_COLORS = { fastest: '#999999', balanced: '#0099ff', optimal: '#6a4cf5' };
+  let leafletMap = null, routeLayerGroup = null;
+  let kakaoMap = null, kakaoOverlays = [];
+  const usingKakao = !!CONFIG.KAKAO_JS_KEY;
+
+  function initMap() {
+    if (usingKakao) { loadKakaoMap(); return; }
+    leafletMap = L.map('leafletMap', { zoomControl: true, attributionControl: true }).setView([CENTER_LAT, CENTER_LNG], 16);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      subdomains: 'abcd', maxZoom: 19, attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+    }).addTo(leafletMap);
+    routeLayerGroup = L.layerGroup().addTo(leafletMap);
+    if (DONG_BOUNDARY) {
+      for (const dong of DONG_BOUNDARY) {
+        for (const ring of dong.rings) {
+          L.polygon(ring, { color: '#0099ff', weight: 1.5, opacity: 0.5, fill: false, dashArray: '4,6' }).addTo(leafletMap);
+        }
+      }
+    }
+    setTimeout(() => leafletMap.invalidateSize(), 200);
+  }
+  function loadKakaoMap() {
+    document.getElementById('leafletMap').style.display = 'none';
+    document.getElementById('kakaoMap').style.display = 'block';
+    const script = document.createElement('script');
+    script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${CONFIG.KAKAO_JS_KEY}&autoload=false`;
+    script.onload = () => {
+      kakao.maps.load(() => {
+        kakaoMap = new kakao.maps.Map(document.getElementById('kakaoMap'), {
+          center: new kakao.maps.LatLng(CENTER_LAT, CENTER_LNG), level: 4,
+        });
+        if (DONG_BOUNDARY) {
+          for (const dong of DONG_BOUNDARY) {
+            for (const ring of dong.rings) {
+              new kakao.maps.Polygon({
+                map: kakaoMap,
+                path: ring.map(([lat, lng]) => new kakao.maps.LatLng(lat, lng)),
+                strokeWeight: 1.5, strokeColor: '#0099ff', strokeOpacity: 0.5, strokeStyle: 'dash', fillOpacity: 0,
+              });
+            }
+          }
+        }
+        if (window.__lastRoutes) renderMapRoutes(window.__lastRoutes);
+      });
+    };
+    document.head.appendChild(script);
+  }
+  function dotIcon(color) {
+    return L.divIcon({ className: '', html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #090909;box-shadow:0 0 0 2px ${color}55;"></div>`, iconSize: [14, 14], iconAnchor: [7, 7] });
+  }
+  function nodePathToLatLng(nodePath) { return nodePath.map((id) => [GRAPH.nodes[id].lat, GRAPH.nodes[id].lng]); }
+
+  function renderMapRoutes(routes) {
+    window.__lastRoutes = routes;
+    const recKey = activeConditions.size ? 'optimal' : 'fastest';
+    if (usingKakao) {
+      if (!kakaoMap) return;
+      kakaoOverlays.forEach((o) => o.setMap(null));
+      kakaoOverlays = [];
+      ['optimal', 'balanced', 'fastest'].forEach((key) => {
+        const r = routes[key];
+        const isRec = key === recKey;
+        const path = nodePathToLatLng(r.nodePath).map(([lat, lng]) => new kakao.maps.LatLng(lat, lng));
+        const line = new kakao.maps.Polyline({ map: kakaoMap, path, strokeWeight: isRec ? 5 : 3, strokeColor: ROUTE_COLORS[key], strokeOpacity: isRec ? 0.95 : 0.4, strokeStyle: isRec ? 'solid' : 'shortdash' });
+        kakaoOverlays.push(line);
+      });
+      const bounds = new kakao.maps.LatLngBounds();
+      nodePathToLatLng(routes.fastest.nodePath).forEach(([lat, lng]) => bounds.extend(new kakao.maps.LatLng(lat, lng)));
+      kakaoMap.setBounds(bounds);
+      return;
+    }
+    if (!leafletMap) return;
+    routeLayerGroup.clearLayers();
+    ['optimal', 'balanced', 'fastest'].forEach((key) => {
+      const r = routes[key];
+      const isRec = key === recKey;
+      L.polyline(nodePathToLatLng(r.nodePath), {
+        color: ROUTE_COLORS[key], weight: isRec ? 5 : 3, opacity: isRec ? 0.95 : 0.4, dashArray: isRec ? null : '2,8', lineCap: 'round',
+      }).addTo(routeLayerGroup);
+    });
+    const allLatLng = nodePathToLatLng(routes.fastest.nodePath);
+    L.marker(allLatLng[0], { icon: dotIcon('#0099ff') }).addTo(routeLayerGroup);
+    L.marker(allLatLng[allLatLng.length - 1], { icon: dotIcon('#ff5577') }).addTo(routeLayerGroup);
+    leafletMap.fitBounds(L.latLngBounds(allLatLng), { padding: [26, 26] });
+
+    document.getElementById('mapLegend').innerHTML = `
+      <span><i class="sw" style="background:${ROUTE_COLORS.fastest}"></i>빠른</span>
+      <span><i class="sw" style="background:${ROUTE_COLORS.balanced}"></i>균형</span>
+      <span><i class="sw" style="background:${ROUTE_COLORS.optimal}"></i>최적</span>
+    `;
+  }
+
+  // ==================== 태양-건물 3D 모식도 (SVG) ====================
+  function renderSunDiagram(routes) {
+    const box = document.getElementById('sunDiagram');
+    const route = routes[selectedRouteKey] || routes.fastest;
+    const coords = route.nodePath.map((id) => GRAPH.nodes[id]);
+    let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+    for (const c of coords) { minLat = Math.min(minLat, c.lat); maxLat = Math.max(maxLat, c.lat); minLng = Math.min(minLng, c.lng); maxLng = Math.max(maxLng, c.lng); }
+    const padDeg = 0.0004;
+    minLat -= padDeg; maxLat += padDeg; minLng -= padDeg; maxLng += padDeg;
+    const latC = (minLat + maxLat) / 2;
+    const mPerDegLat = 110540, mPerDegLng = 111320 * Math.cos(latC * Math.PI / 180);
+    const W = 340, H = 220;
+    const rangeXm = (maxLng - minLng) * mPerDegLng, rangeYm = (maxLat - minLat) * mPerDegLat;
+    const scale = Math.max(0.2, Math.min((W - 20) / Math.max(rangeXm, 1), (H - 20) / Math.max(rangeYm, 1)));
+    const toXY = (lat, lng) => [W / 2 + (lng - (minLng + maxLng) / 2) * mPerDegLng * scale, H / 2 - (lat - latC) * mPerDegLat * scale];
+
+    const nearby = BUILDINGS.filter((b) => {
+      const [blat, blng] = b.footprint[0];
+      return blat > minLat - 0.0006 && blat < maxLat + 0.0006 && blng > minLng - 0.0006 && blng < maxLng + 0.0006;
+    }).slice(0, 60);
+
+    let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+    svg += `<rect x="0" y="0" width="${W}" height="${H}" fill="#141414"/>`;
+
+    // 그림자 (낮일 때만)
+    if (SUN_STATE.isDaytime) {
+      for (const b of nearby) {
+        const poly = buildShadowPolygon(b, SUN_STATE.azimuth, SUN_STATE.altitude);
+        const pts = poly.map(([lat, lng]) => toXY(lat, lng).join(',')).join(' ');
+        svg += `<polygon points="${pts}" fill="#000000" opacity="0.35"/>`;
+      }
+    }
+
+    // 건물 블록 (의사-3D 돌출)
+    for (const b of nearby) {
+      const topPts = b.footprint.map(([lat, lng]) => toXY(lat, lng));
+      const extrusionPx = Math.min(16, Math.sqrt(b.heightM) * 1.1);
+      const sidePts = topPts.map(([x, y]) => [x - extrusionPx * 0.5, y - extrusionPx * 0.85]);
+      svg += `<polygon points="${sidePts.map((p) => p.join(',')).join(' ')}" fill="#2a2a2a" stroke="#333" stroke-width="0.5"/>`;
+      svg += `<polygon points="${topPts.map((p) => p.join(',')).join(' ')}" fill="#3a3a3f" stroke="#4a4a52" stroke-width="0.6"/>`;
+    }
+
+    // 경로선 (구간별 노출도로 색 구분)
+    for (let i = 0; i < route.nodePath.length - 1; i++) {
+      const a = GRAPH.nodes[route.nodePath[i]], b = GRAPH.nodes[route.nodePath[i + 1]];
+      const idx = route.edgePath[i];
+      const exp = EDGE_META[idx] ? EDGE_META[idx].sunExposure : 0;
+      const color = !SUN_STATE.isDaytime ? '#7a8290' : exp > 0.5 ? '#ffb020' : '#0099ff';
+      const [x1, y1] = toXY(a.lat, a.lng), [x2, y2] = toXY(b.lat, b.lng);
+      svg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="3" stroke-linecap="round"/>`;
+    }
+
+    // 태양/달 위치 글리프 (방위각을 원형 테두리 위 위치로, 고도를 크기/밝기로 표현)
+    if (SUN_STATE.isDaytime) {
+      const az = SUN_STATE.azimuth * Math.PI / 180;
+      const sx = W / 2 + Math.sin(az) * (W / 2 - 16);
+      const sy = H / 2 - Math.cos(az) * (H / 2 - 16);
+      const r = 6 + (SUN_STATE.altitude / 90) * 8;
+      const opacity = 0.5 + (SUN_STATE.altitude / 90) * 0.5;
+      svg += `<circle cx="${sx}" cy="${sy}" r="${r}" fill="#ffcc55" opacity="${opacity.toFixed(2)}"/>`;
+      svg += `<circle cx="${sx}" cy="${sy}" r="${r + 5}" fill="none" stroke="#ffcc55" stroke-width="1" opacity="${(opacity * 0.4).toFixed(2)}"/>`;
+    } else {
+      svg += `<text x="${W - 26}" y="24" font-size="18">🌙</text>`;
+    }
+
+    svg += '</svg>';
+    box.innerHTML = svg;
+
+    const monthEl = selectedMonth(), hourEl = selectedHour();
+    document.getElementById('diagramCaption').textContent = SUN_STATE.isDaytime
+      ? `${monthEl}월 ${hourEl}시 · 방위각 ${Math.round(SUN_STATE.azimuth)}° · 고도 ${Math.round(SUN_STATE.altitude)}°`
+      : `${monthEl}월 ${hourEl}시 · 밤 (해 없음)`;
+  }
+
+  // ==================== 조건 칩 / 검색 ====================
+  function renderChips() {
+    document.getElementById('chipRow').innerHTML = CONDITIONS.map((c) => {
+      const active = activeConditions.has(c.id);
+      return `
+      <div class="chip ${active ? 'active' : ''}" onclick="toggleCondition('${c.id}')">
+        <span class="chip-check">${active ? '✓' : ''}</span>
+        <span>${c.icon}</span><span>${c.label}</span>
+      </div>`;
+    }).join('');
+  }
+  function toggleCondition(id) {
+    if (activeConditions.has(id)) activeConditions.delete(id); else activeConditions.add(id);
+    syncSearchInputFromConditions();
+    render();
+  }
+  function syncSearchInputFromConditions() {
+    const labels = CONDITIONS.filter((c) => activeConditions.has(c.id)).map((c) => c.label);
+    document.getElementById('searchInput').value = labels.length ? `${labels.join(', ')} 알려줘` : '';
+  }
+  function runSearch() {
+    const text = document.getElementById('searchInput').value.trim();
+    if (!text) { render(); return; }
+    const matched = CONDITIONS.filter((c) => c.keywords.some((k) => text.includes(k))).map((c) => c.id);
+    activeConditions = new Set(matched);
+    render();
+  }
+  function onLocationChange() { render(); }
+  function swapLocations() {
+    const o = document.getElementById('originInput'), d = document.getElementById('destInput');
+    const tmp = o.value; o.value = d.value; d.value = tmp;
+    render();
+  }
+  function onTimeChange() { computeExposures(); render(); }
+  function switchTab(tab) {
+    currentTab = tab;
+    document.getElementById('tab2dBtn').classList.toggle('active', tab === '2d');
+    document.getElementById('tab3dBtn').classList.toggle('active', tab === '3d');
+    document.getElementById('tab2dPanel').classList.toggle('active', tab === '2d');
+    document.getElementById('tab3dPanel').classList.toggle('active', tab === '3d');
+    if (tab === '2d' && leafletMap) setTimeout(() => leafletMap.invalidateSize(), 50);
+    if (tab === '3d' && window.__lastRoutes) renderSunDiagram(window.__lastRoutes);
+  }
+  function selectRoute(key) {
+    selectedRouteKey = key;
+    if (window.__lastRoutes) {
+      renderResultsHtml(window.__lastRoutes);
+      if (currentTab === '3d') renderSunDiagram(window.__lastRoutes);
+    }
+  }
+
+  // ==================== 결과 카드 ====================
+  function buildInsight(key, route, fastest) {
+    if (key === 'fastest') return '가장 빠르게 도착하는 경로예요.';
+    const deltaTime = route.time - fastest.time;
+    const fragments = [];
+    if (activeConditions.has('sun')) {
+      const pct = Math.max(0, Math.round((fastest.sun - route.sun) / Math.max(fastest.sun, 0.01) * 100));
+      fragments.push(`햇빛 노출 <b>${pct}%↓</b>`);
+    }
+    if (activeConditions.has('rain')) {
+      const pct = Math.max(0, Math.round((fastest.rain - route.rain) / Math.max(fastest.rain, 0.01) * 100));
+      fragments.push(`비 노출 <b>${pct}%↓</b>`);
+    }
+    if (!fragments.length) return `빠른 길과 거의 같은 경로예요.`;
+    if (deltaTime <= 0) return `빠른 길과 시간은 비슷한데 ${fragments.join(' · ')} 이에요.`;
+    return `빠른 길보다 <b>${deltaTime}분</b> 더 걸리지만 ${fragments.join(' · ')} 이에요.`;
+  }
+  function renderCard(key, route, fastest, recommendedKey) {
+    const isRecommended = key === recommendedKey;
+    const isSelected = key === selectedRouteKey;
+    const deltaTime = route.time - fastest.time;
+    const badgeText = key === 'fastest' ? '가장 빠른 길' : key === 'optimal' ? '최적' : '균형';
+    const stats = [];
+    if (activeConditions.has('sun')) stats.push(`<div class="stat-chip key"><span>☀️</span><span>햇빛 ${Math.round(route.sun * 100)}%</span></div>`);
+    if (activeConditions.has('rain')) stats.push(`<div class="stat-chip key"><span>🌧️</span><span>비 ${Math.round(route.rain * 100)}%</span></div>`);
+    return `
+      <div class="result-card ${isRecommended ? 'recommended' : ''}" onclick="selectRoute('${key}')" style="cursor:pointer; ${isSelected ? 'outline:1.5px solid var(--accent-blue);' : ''}">
+        <div class="result-top">
+          <span class="badge ${isRecommended ? 'rec' : ''}">${isRecommended ? '추천' : badgeText}</span>
+          <div style="display:flex;align-items:baseline;gap:8px;">
+            <div class="time-block"><span class="num">${route.time}</span><span class="unit">분</span></div>
+            <span class="time-delta ${deltaTime > 0 ? 'plus' : 'zero'}">${deltaTime > 0 ? '+' + deltaTime + '분' : '최단'}</span>
+          </div>
+        </div>
+        <div class="insight">${buildInsight(key, route, fastest)}</div>
+        ${stats.length ? `<div class="stat-grid">${stats.join('')}</div>` : ''}
+      </div>
+    `;
+  }
+  function renderResultsHtml(routes) {
+    const recommendedKey = activeConditions.size ? 'optimal' : 'fastest';
+    const order = ['fastest', 'balanced', 'optimal'];
+    document.getElementById('resultsBox').innerHTML = order.map((k) => renderCard(k, routes[k], routes.fastest, recommendedKey)).join('');
+  }
+
+  // ==================== 메인 렌더 ====================
+  function render() {
+    renderChips();
+    const labels = CONDITIONS.filter((c) => activeConditions.has(c.id)).map((c) => c.icon + ' ' + c.label);
+    document.getElementById('modeTag').textContent = labels.length ? labels.join(' · ') : '⚡ 빠른 길';
+    document.getElementById('nightNote').classList.toggle('show', !SUN_STATE.isDaytime);
+
+    const origin = document.getElementById('originInput').value;
+    const dest = document.getElementById('destInput').value;
+    const oCoord = findPresetCoord(origin), dCoord = findPresetCoord(dest);
+    const startId = nearestNodeId(oCoord.lat, oCoord.lng);
+    const endId = nearestNodeId(dCoord.lat, dCoord.lng);
+
+    const routes = computeThreeRoutes(startId, endId);
+    if (!routes) {
+      document.getElementById('resultsBox').innerHTML = '<div class="footnote">이 두 지점을 잇는 보행 경로를 찾지 못했어요. 다른 지점을 선택해보세요.</div>';
+      return;
+    }
+    if (!['fastest', 'balanced', 'optimal'].includes(selectedRouteKey)) selectedRouteKey = 'optimal';
+    renderMapRoutes(routes);
+    renderResultsHtml(routes);
+    if (currentTab === '3d') renderSunDiagram(routes);
+    if (busPanelOpen) renderBusPanel();
+  }
+
+  // ==================== 초기화 ====================
+  function populateTimeSelects() {
+    const now = new Date();
+    const monthSel = document.getElementById('monthSelect');
+    monthSel.innerHTML = Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}">${i + 1}월</option>`).join('');
+    monthSel.value = now.getMonth() + 1;
+    const hourSel = document.getElementById('hourSelect');
+    hourSel.innerHTML = Array.from({ length: 24 }, (_, i) => `<option value="${i}">${i}시</option>`).join('');
+    hourSel.value = now.getHours();
+  }
+  function populatePresetList() {
+    document.getElementById('placeList').innerHTML = PRESETS.map((p) => `<option value="${displayName(p)}">`).join('');
+  }
+
+  async function init() {
+    const [graph, buildings, presets, dongBoundary] = await Promise.all([
+      fetch('./data/yeoksam_graph.json').then((r) => r.json()),
+      fetch('./data/yeoksam_buildings.json').then((r) => r.json()),
+      fetch('./data/yeoksam_presets.json').then((r) => r.json()),
+      fetch('./data/yeoksam_dong_boundary.json').then((r) => r.json()).catch(() => []),
+    ]);
+    GRAPH = graph; BUILDINGS = buildings; PRESETS = presets; DONG_BOUNDARY = dongBoundary;
+    ADJ = buildAdjacency(GRAPH);
+    BUILD_GRID = buildGrid(BUILDINGS);
+
+    populateTimeSelects();
+    populatePresetList();
+    renderChips();
+    initMap();
+    computeExposures();
+    render();
+  }
+
+  init();
+</script>
+</body>
+</html>
