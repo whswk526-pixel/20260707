@@ -183,6 +183,9 @@
   }
   .dot-line { width: 1px; height: 18px; background: var(--hairline); }
   .pick-hint { font-size: 10.5px; color: var(--ink-faint); margin: -4px 0 10px 4px; }
+  .coverage-hint { font-size: 11px; font-weight: 600; color: var(--accent-blue); background: rgba(0,102,255,0.1); border: 1px solid rgba(0,102,255,0.25); border-radius: 8px; padding: 5px 9px; margin: 0 0 8px; display: inline-block; }
+  .coverage-badge { font-size: 11.5px; font-weight: 700; color: #fff; background: #0066ff; padding: 3px 9px; border-radius: 20px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,0.35); pointer-events: none; }
+  .busstop-pin { width: 22px; height: 22px; border-radius: 50%; background: #22c55e; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; font-size: 12px; cursor: pointer; }
   .route-fields { flex: 1; display: flex; flex-direction: column; gap: 8px; }
   .route-fields input {
     width: 100%; background: transparent; border: none; outline: none;
@@ -604,6 +607,7 @@
           <button class="swap-btn" onclick="swapLocations()" title="출발지·도착지 바꾸기">⇅</button>
         </div>
         <button class="find-route-btn" onclick="findRoute()">🔍 경로 탐색</button>
+        <div class="coverage-hint">🔵 지원 구역: 강남역~역삼~선릉 일대 (지도에서 어둡게 막힌 곳은 검색·길찾기가 안 돼요)</div>
         <div class="pick-hint">📍 점을 누르면 지도를 클릭해서 위치를 찍을 수 있어요</div>
       </div>
     </div>
@@ -661,6 +665,16 @@
   </div>
 </div>
 
+<div class="station-map-modal" id="busStopModal" onclick="if(event.target===this) closeBusStopModal()">
+  <div class="station-map-sheet">
+    <div class="station-map-head">
+      <span id="busStopTitle"></span>
+      <button onclick="closeBusStopModal()">✕</button>
+    </div>
+    <div class="station-map-body" id="busStopBody"></div>
+  </div>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <!--
   Tmap Vector SDK는 내부적으로 document.write로 하위 스크립트를 끼워 넣는데, 이건 파서가
@@ -681,6 +695,7 @@
 <script src="data/yeoksam_buildings.js"></script>
 <script src="data/yeoksam_presets.js"></script>
 <script src="data/yeoksam_dong_boundary.js"></script>
+<script src="data/yeoksam_busstops.js"></script>
 <script>
   // ==================== 설정 ====================
   // developers.kakao.com 에서 발급받은 JavaScript 키를 넣으면 카카오맵으로 전환됩니다.
@@ -866,7 +881,7 @@
   function queryGrid(lat, lng) { return BUILD_GRID.get(cellKey(lat, lng)) || []; }
 
   // ==================== 데이터 로딩 ====================
-  let GRAPH = null, BUILDINGS = null, PRESETS = null, DONG_BOUNDARY = null, ADJ = null;
+  let GRAPH = null, BUILDINGS = null, PRESETS = null, DONG_BOUNDARY = null, ADJ = null, BUSSTOPS = null;
   const CENTER_LAT = 37.500, CENTER_LNG = 127.0365;
   // scripts/fetch_yeoksam_data.js의 BBOX와 동일 — 데이터가 실제로 커버하는 범위를 지도에 표시
   const COVERAGE_BBOX = { south: 37.488, west: 127.020, north: 37.514, east: 127.056 };
@@ -874,6 +889,22 @@
     [COVERAGE_BBOX.south, COVERAGE_BBOX.west], [COVERAGE_BBOX.south, COVERAGE_BBOX.east],
     [COVERAGE_BBOX.north, COVERAGE_BBOX.east], [COVERAGE_BBOX.north, COVERAGE_BBOX.west],
   ];
+  // 지원 구역 밖을 안내판 대신 그냥 어둡게 막아버리기 위한 4개의 "테두리 띠" 사각형.
+  // (구멍 뚫린 폴리곤은 지도 SDK 3종 모두에서 동일하게 지원되진 않아서, 단순 사각형 4장으로 감싸는 방식을 씀)
+  const MASK_MARGIN = 0.04;
+  const MASK_OUTER = {
+    south: COVERAGE_BBOX.south - MASK_MARGIN, north: COVERAGE_BBOX.north + MASK_MARGIN,
+    west: COVERAGE_BBOX.west - MASK_MARGIN, east: COVERAGE_BBOX.east + MASK_MARGIN,
+  };
+  function coverageMaskRects() {
+    const o = MASK_OUTER, c = COVERAGE_BBOX;
+    return [
+      { south: c.north, north: o.north, west: o.west, east: o.east },
+      { south: o.south, north: c.south, west: o.west, east: o.east },
+      { south: c.south, north: c.north, west: o.west, east: c.west },
+      { south: c.south, north: c.north, west: c.east, east: o.east },
+    ];
+  }
   const WALK_SPEED_MPS = 1.25;
 
   // graph.edges[].from/to는 JSON에서 숫자로 오지만 GRAPH.nodes 키(및 Map 기반 순회)는
@@ -899,11 +930,16 @@
   // Tmap의 실제 장소 데이터베이스를 검색해서 어디든 찾을 수 있게 한다.
   const searchResultsCache = { origin: [], dest: [] };
   const searchDebounce = {};
+  function inCoverage(lat, lng) {
+    return lat >= COVERAGE_BBOX.south && lat <= COVERAGE_BBOX.north && lng >= COVERAGE_BBOX.west && lng <= COVERAGE_BBOX.east;
+  }
   async function searchPlaces(keyword) {
     if (!CONFIG.TMAP_APP_KEY || !keyword || keyword.trim().length < 2) return [];
     try {
+      // Tmap이 전국 POI를 다 돌려주지만, 길찾기는 지원 구역(COVERAGE_BBOX) 안에서만 되기 때문에
+      // 그 밖의 결과는 검색 단계에서부터 아예 안 보여준다 (radius도 구역 크기에 맞춰 좁게).
       const url = `https://apis.openapi.sk.com/tmap/pois?version=1&searchKeyword=${encodeURIComponent(keyword)}` +
-        `&resCoordType=WGS84GEO&reqCoordType=WGS84GEO&count=8&centerLon=${CENTER_LNG}&centerLat=${CENTER_LAT}&radius=8&reqCoordType=WGS84GEO`;
+        `&resCoordType=WGS84GEO&reqCoordType=WGS84GEO&count=15&centerLon=${CENTER_LNG}&centerLat=${CENTER_LAT}&radius=3&reqCoordType=WGS84GEO`;
       const res = await fetch(url, { headers: { appKey: CONFIG.TMAP_APP_KEY, Accept: 'application/json' } });
       if (!res.ok) return [];
       const data = await res.json();
@@ -913,7 +949,7 @@
         lat: parseFloat(p.noorLat || p.frontLat),
         lng: parseFloat(p.noorLon || p.frontLon),
         addr: [p.roadName, p.firstBuildNo].filter(Boolean).join(' ') || [p.upperAddrName, p.middleAddrName, p.lowerAddrName].filter(Boolean).join(' '),
-      })).filter((r) => Number.isFinite(r.lat) && Number.isFinite(r.lng));
+      })).filter((r) => Number.isFinite(r.lat) && Number.isFinite(r.lng) && inCoverage(r.lat, r.lng)).slice(0, 8);
     } catch (e) {
       console.warn('장소 검색 실패:', e.message);
       return [];
@@ -1185,7 +1221,10 @@
     return { fastest, balanced, optimal };
   }
 
-  // ==================== 버스 도우미 (기존 mock 유지) ====================
+  // ==================== 버스 도우미 ====================
+  // 정류장 위치/이름은 OSM에서 받은 실제 데이터(scripts/fetch_bus_stops.js). 서울시
+  // 실시간 버스도착정보 API는 발급형 키가 필요해 이 저장소엔 없어서, 배차 간격만은
+  // 여전히 추정치다 — UI에도 "실시간 아님"을 명시한다.
   function hashStr(str) {
     let h = 2166136261;
     for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
@@ -1196,9 +1235,19 @@
     return function () { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
   }
   function range(rand, min, max) { return Math.round(min + rand() * (max - min)); }
-  function generateBusStops(origin, dest) {
+  function generateBusStops(origin, dest, originCoord) {
+    if (!BUSSTOPS || !BUSSTOPS.length || !originCoord) return [];
     const rand = seededRand('bus:' + origin + '→' + dest);
-    return ['A정류장', 'B정류장', 'C정류장'].map((name) => ({ name, walkBase: range(rand, 2, 8), busArrival: range(rand, 3, 10) }));
+    const nearest = BUSSTOPS
+      .map((s) => ({ ...s, distM: haversine(originCoord, s) }))
+      .sort((a, b) => a.distM - b.distM)
+      .slice(0, 3);
+    return nearest.map((s) => ({
+      id: s.id,
+      name: s.name,
+      walkBase: Math.max(1, s.distM / WALK_SPEED_MPS / 60),
+      busArrival: range(rand, 3, 10),
+    }));
   }
   const SPEED_MULT = { 느림: 1.3, 보통: 1.0, 빠름: 0.72 };
   function busChanceLabel(margin) {
@@ -1211,13 +1260,20 @@
     document.getElementById('busPanel').classList.toggle('open', busPanelOpen);
     document.getElementById('busToggleBtn').classList.toggle('active', busPanelOpen);
     renderBusPanel();
+    renderBusStopMarkers();
   }
   function renderBusPanel() {
     if (!busPanelOpen) return;
     document.getElementById('speedSeg').innerHTML = Object.keys(SPEED_MULT).map((s) => `<button class="${s === speedLevel ? 'active' : ''}" onclick="setSpeed('${s}')">${s}</button>`).join('');
     const origin = document.getElementById('originInput').value || '출발지';
     const dest = document.getElementById('destInput').value || '도착지';
-    const withMargin = generateBusStops(origin, dest).map((s) => {
+    const originCoord = resolveLocationCoord(origin, 'origin');
+    const stops = generateBusStops(origin, dest, originCoord);
+    if (!stops.length) {
+      document.getElementById('busStopList').innerHTML = '<div class="footnote">출발지 근처 정류장을 찾을 수 없어요. 지원 구역 안의 출발지로 검색해주세요.</div>';
+      return;
+    }
+    const withMargin = stops.map((s) => {
       const walk = Math.max(1, Math.round(s.walkBase * SPEED_MULT[speedLevel]));
       const margin = s.busArrival - walk;
       return { ...s, walk, margin, chance: busChanceLabel(margin) };
@@ -1225,16 +1281,69 @@
     let best = withMargin[0];
     withMargin.forEach((s) => { if (s.chance.cls === 'high' && (best.chance.cls !== 'high' || s.margin > best.margin)) best = s; });
     document.getElementById('busStopList').innerHTML = withMargin.map((s) => `
-      <div class="bus-stop-row">
+      <div class="bus-stop-row" onclick="showBusStopInfo(${s.id})" style="cursor:pointer;">
         <div>
           <div class="bus-stop-name">${s.name} ${s === best ? '⭐' : ''}</div>
-          <div class="bus-stop-meta">도보 ${s.walk}분 · 버스 ${s.busArrival}분 후 도착</div>
+          <div class="bus-stop-meta">실제 위치 기준 도보 ${s.walk}분 · 버스 도착 예상 ${s.busArrival}분 후</div>
         </div>
         <div class="bus-chance ${s.chance.cls}">${s.chance.label}</div>
       </div>
-    `).join('');
+    `).join('') + '<div class="footnote">정류장 위치는 실측(OSM) 데이터, 버스 도착 시간은 실시간이 아닌 추정치예요. 정류장을 눌러보면 지나가는 노선도 볼 수 있어요.</div>';
   }
   function setSpeed(s) { speedLevel = s; renderBusPanel(); }
+
+  // ==================== 버스 정류장 지도 표시 + 정보 모달 ====================
+  // 노선 번호는 OSM route=bus 릴레이션 실측 데이터(scripts/fetch_bus_routes.js).
+  // 도착 예정 시간은 실시간 API 키가 없어 정류장·노선 조합으로 고정 시드를 걸어
+  // 그럴듯한 배차 간격을 만들어낸 추정치이며, 모달에도 이를 명시한다.
+  function showBusStopInfo(stopId) {
+    const stop = (BUSSTOPS || []).find((s) => s.id === stopId);
+    if (!stop) return;
+    document.getElementById('busStopTitle').textContent = `🚌 ${stop.name}`;
+    const routes = stop.routes && stop.routes.length ? stop.routes : null;
+    const rows = routes
+      ? routes.map((ref) => {
+          const rand = seededRand(`route:${stop.id}:${ref}`);
+          return `<div class="bus-stop-row"><div class="bus-stop-name">${ref}번</div><div class="bus-chance mid">약 ${range(rand, 3, 12)}분 후 도착(추정)</div></div>`;
+        }).join('')
+      : '<div class="footnote">이 정류장을 지나는 노선 정보가 OSM 데이터에 없어요.</div>';
+    document.getElementById('busStopBody').innerHTML = `<div style="padding:2px 2px 10px;">${rows}</div><div class="footnote" style="padding:0 2px;">노선 목록은 실측(OSM) 데이터, 도착 시간은 실시간이 아닌 추정치예요.</div>`;
+    document.getElementById('busStopModal').classList.add('show');
+  }
+  function closeBusStopModal() { document.getElementById('busStopModal').classList.remove('show'); }
+
+  let busStopOverlays = [];
+  function clearBusStopMarkers() {
+    busStopOverlays.forEach((o) => { if (o.remove) o.remove(); else if (o.setMap) o.setMap(null); });
+    busStopOverlays = [];
+  }
+  function renderBusStopMarkers() {
+    clearBusStopMarkers();
+    if (!busPanelOpen || !BUSSTOPS) return;
+    if (usingTmap && tmapMap) {
+      BUSSTOPS.forEach((s) => {
+        const m = new Tmapv3.Marker({ position: new Tmapv3.LatLng(s.lat, s.lng), map: tmapMap, iconHTML: '<div class="busstop-pin">🚌</div>' });
+        if (m.on) m.on('click', () => showBusStopInfo(s.id));
+        busStopOverlays.push(m);
+      });
+    } else if (usingKakao && kakaoMap) {
+      BUSSTOPS.forEach((s) => {
+        const overlay = new kakao.maps.CustomOverlay({
+          map: kakaoMap, position: new kakao.maps.LatLng(s.lat, s.lng),
+          content: `<div class="busstop-pin" onclick="showBusStopInfo(${s.id})">🚌</div>`, yAnchor: 0.5,
+        });
+        busStopOverlays.push(overlay);
+      });
+    } else if (leafletMap) {
+      BUSSTOPS.forEach((s) => {
+        const m = L.marker([s.lat, s.lng], {
+          icon: L.divIcon({ className: '', html: '<div class="busstop-pin">🚌</div>', iconSize: [22, 22], iconAnchor: [11, 11] }),
+        }).addTo(leafletMap);
+        m.on('click', () => showBusStopInfo(s.id));
+        busStopOverlays.push(m);
+      });
+    }
+  }
 
   // ==================== 지도 (Leaflet 기본, 우선순위: Tmap > 카카오맵 > Leaflet) ====================
   const ROUTE_COLORS = { fastest: '#999999', balanced: '#0099ff', optimal: '#6a4cf5' };
@@ -1300,11 +1409,20 @@
         }
       }
     }
-    // 데이터가 실제로 커버하는 범위 — 이 밖은 검색은 되지만 길찾기는 안 됨
-    L.polygon(COVERAGE_RING, { color: '#0099ff', weight: 1.5, opacity: 0.5, fill: false, dashArray: '6,6' }).addTo(leafletMap);
+    // 데이터가 실제로 커버하는 범위 — 이 밖은 검색 자체가 안 나오고, 길찾기도 안 됨. 그냥 선으로
+    // 표시하면 눈에 잘 안 띄어서, 범위 밖 전체를 어둡게 막아버려 "여긴 안 됨"이 바로 보이게 함.
+    coverageMaskRects().forEach((r) => {
+      L.rectangle([[r.south, r.west], [r.north, r.east]], { color: 'transparent', weight: 0, fill: true, fillColor: '#0a0b0d', fillOpacity: 0.45, interactive: false }).addTo(leafletMap);
+    });
+    L.polygon(COVERAGE_RING, { color: '#0066ff', weight: 3, opacity: 0.9, fill: false }).addTo(leafletMap);
+    L.marker([COVERAGE_BBOX.north, (COVERAGE_BBOX.west + COVERAGE_BBOX.east) / 2], {
+      icon: L.divIcon({ className: '', html: '<div class="coverage-badge">🔵 지원 구역</div>', iconSize: [0, 0] }),
+      interactive: false,
+    }).addTo(leafletMap);
     leafletMap.on('click', (e) => onMapPointPicked(e.latlng.lat, e.latlng.lng));
     setTimeout(() => leafletMap.invalidateSize(), 200);
     if (window.__lastRoutes) renderMapRoutes(window.__lastRoutes);
+    renderBusStopMarkers();
   }
   // 카카오맵이 실패하면 Tmap을, Tmap도 안 되면 Leaflet을 순서대로 시도한다.
   let mapFellBack = false;
@@ -1341,11 +1459,26 @@
           }
         }
       }
-      // 데이터가 실제로 커버하는 범위 — 이 밖은 검색은 되지만 길찾기는 안 됨
+      // 데이터가 실제로 커버하는 범위 — 이 밖은 어둡게 막아서 "여긴 안 됨"이 바로 보이게 함
+      coverageMaskRects().forEach((r) => {
+        new Tmapv3.Polygon({
+          map: tmapMap,
+          paths: [
+            new Tmapv3.LatLng(r.south, r.west), new Tmapv3.LatLng(r.south, r.east),
+            new Tmapv3.LatLng(r.north, r.east), new Tmapv3.LatLng(r.north, r.west),
+          ],
+          strokeOpacity: 0, fillColor: '#0a0b0d', fillOpacity: 0.45,
+        });
+      });
       new Tmapv3.Polygon({
         map: tmapMap,
         paths: COVERAGE_RING.map(([lat, lng]) => new Tmapv3.LatLng(lat, lng)),
-        strokeColor: '#0099ff', strokeWeight: 1.5, strokeOpacity: 0.5, fillOpacity: 0,
+        strokeColor: '#0066ff', strokeWeight: 3, strokeOpacity: 0.9, fillOpacity: 0,
+      });
+      new Tmapv3.Marker({
+        map: tmapMap,
+        position: new Tmapv3.LatLng(COVERAGE_BBOX.north, (COVERAGE_BBOX.west + COVERAGE_BBOX.east) / 2),
+        iconHTML: '<div class="coverage-badge">🔵 지원 구역</div>',
       });
       // Tmap Vector JS 클릭 이벤트 payload 형식이 문서로 확인이 안 돼서, 대신 지도 컨테이너의
       // 원시 DOM 클릭 좌표를 받아 확인된 API인 screenToReal()로 좌표 변환한다 (더 안전한 방법).
@@ -1362,6 +1495,7 @@
         } catch (e) { console.warn('Tmap 좌표 변환 실패:', e.message); }
       });
       if (window.__lastRoutes) renderMapRoutes(window.__lastRoutes);
+      renderBusStopMarkers();
     } catch (e) {
       fallbackToLeaflet(e.message);
     }
@@ -1390,10 +1524,33 @@
               }
             }
           }
+          // 데이터가 실제로 커버하는 범위 — 이 밖은 어둡게 막아서 "여긴 안 됨"이 바로 보이게 함
+          coverageMaskRects().forEach((r) => {
+            new kakao.maps.Polygon({
+              map: kakaoMap,
+              path: [
+                new kakao.maps.LatLng(r.south, r.west), new kakao.maps.LatLng(r.south, r.east),
+                new kakao.maps.LatLng(r.north, r.east), new kakao.maps.LatLng(r.north, r.west),
+              ],
+              strokeOpacity: 0, fillColor: '#0a0b0d', fillOpacity: 0.45,
+            });
+          });
+          new kakao.maps.Polygon({
+            map: kakaoMap,
+            path: COVERAGE_RING.map(([lat, lng]) => new kakao.maps.LatLng(lat, lng)),
+            strokeWeight: 3, strokeColor: '#0066ff', strokeOpacity: 0.9, fillOpacity: 0,
+          });
+          const badgeOverlay = new kakao.maps.CustomOverlay({
+            map: kakaoMap,
+            position: new kakao.maps.LatLng(COVERAGE_BBOX.north, (COVERAGE_BBOX.west + COVERAGE_BBOX.east) / 2),
+            content: '<div class="coverage-badge">🔵 지원 구역</div>',
+            yAnchor: 1.2,
+          });
           kakao.maps.event.addListener(kakaoMap, 'click', (mouseEvent) => {
             onMapPointPicked(mouseEvent.latLng.getLat(), mouseEvent.latLng.getLng());
           });
           if (window.__lastRoutes) renderMapRoutes(window.__lastRoutes);
+          renderBusStopMarkers();
         });
       } catch (e) {
         fallbackFromKakao(e.message);
@@ -1920,6 +2077,7 @@
     BUILDINGS = window.WAYPICK_BUILDINGS;
     PRESETS = window.WAYPICK_PRESETS;
     DONG_BOUNDARY = window.WAYPICK_DONG_BOUNDARY || [];
+    BUSSTOPS = window.WAYPICK_BUSSTOPS || [];
     ADJ = buildAdjacency(GRAPH);
     BUILD_GRID = buildGrid(BUILDINGS);
     computeSlopeExposures();

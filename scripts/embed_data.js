@@ -13,6 +13,7 @@ const FILES = {
   'yeoksam_buildings.json': 'WAYPICK_BUILDINGS',
   'yeoksam_presets.json': 'WAYPICK_PRESETS',
   'yeoksam_dong_boundary.json': 'WAYPICK_DONG_BOUNDARY',
+  'yeoksam_busstops.json': 'WAYPICK_BUSSTOPS',
 };
 
 for (const [jsonFile, varName] of Object.entries(FILES)) {
