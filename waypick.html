@@ -295,6 +295,23 @@
   .chip.active .chip-check {
     background: var(--accent-blue); border-color: var(--accent-blue); color: #fff;
   }
+  .weather-toggle {
+    position: relative; display: inline-flex;
+    background: var(--surface-1); border: 1px solid var(--hairline);
+    border-radius: var(--r-pill); padding: 3px; margin-bottom: 16px;
+  }
+  .weather-toggle-slider {
+    position: absolute; top: 3px; bottom: 3px; left: 3px;
+    width: 46px; background: var(--ink); border-radius: var(--r-pill);
+    transition: transform .2s ease;
+  }
+  .weather-toggle.rain .weather-toggle-slider { transform: translateX(46px); }
+  .weather-toggle-btn {
+    position: relative; z-index: 1; width: 46px; padding: 8px 0;
+    font-size: 18px; text-align: center; background: none; border: none;
+    color: var(--ink-faint); cursor: pointer; transition: color .15s;
+  }
+  .weather-toggle-btn.active { color: var(--on-primary); }
 
   /* ---------- Bus panel ---------- */
   .bus-panel {
@@ -341,6 +358,15 @@
     padding: 6px 12px; border-radius: var(--r-pill); transition: all .15s;
   }
   .ftab.active { background: var(--ink); color: var(--on-primary); }
+  .shade-toggle-btn {
+    position: absolute; right: 18px; bottom: calc(54% + 10px); z-index: 4;
+    cursor: pointer; font-size: 11px; font-weight: 700; color: var(--ink-muted);
+    background: rgba(255,255,255,0.92); border: none; border-radius: var(--r-pill);
+    padding: 9px 14px; backdrop-filter: blur(4px);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05);
+    transition: all .15s;
+  }
+  .shade-toggle-btn.active { background: #2c3440; color: #fff; }
   .floating-search .route-card {
     background: rgba(255,255,255,0.94); backdrop-filter: blur(8px);
     box-shadow: 0 10px 30px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.06);
@@ -580,6 +606,7 @@
       <div class="ftab" id="tab3dBtn" onclick="switchTab('3d')">🏙️ 3D</div>
       <div class="ftab" id="tabSatBtn" onclick="switchTab('sat')">🛰️ 위성</div>
     </div>
+    <button class="shade-toggle-btn" id="shadeToggleBtn" onclick="toggleShadeOverlay()" title="건물 그림자(그늘) 실제 위치를 지도에 표시">🌗 그늘 보기</button>
 
     <div class="overlay-top">
       <div class="top-nav">
@@ -714,10 +741,13 @@
   };
 
   // ==================== 조건 정의 ====================
+  // 경사·계단은 예전엔 별도 토글이었는데, 지금 상태가 해인지 비인지 하나만 고르면 되고
+  // (사용자 요청: "해랑 비는 토글로 왼쪽오른쪽으로 갈 수 있게"), 경사·계단은 항상 같이
+  // 계산되도록 자동으로 녹여넣었다("메뉴가 없어도 될거같아, 계단 경사는 제대로 계산해주고")
+  // — slopeConsidered()가 항상 true를 반환해서 별도 토글 없이도 늘 반영된다.
   const CONDITIONS = [
     { id: 'sun',   label: '햇빛 피하기', icon: '☀️', keywords: ['햇빛', '일조', '더위', '땀', '그늘', '자외선'] },
     { id: 'rain',  label: '비 피하기',   icon: '🌧️', keywords: ['비', '우산', '장마', '젖', '강수'] },
-    { id: 'slope', label: '경사·계단',   icon: '⛰️', keywords: ['경사', '계단', '오르막', '언덕', '휠체어', '유모차', '캐리어'] },
   ];
   let activeConditions = new Set(['sun']); // 기본값: 햇빛만 ON
   let busPanelOpen = false;
@@ -1095,9 +1125,7 @@
   // 체크된 조건 개수만큼 평균 — 조건이 늘어나도(경사 등) 그대로 확장되는 구조
   // 경사·계단은 햇빛/비 피하기 중 하나라도 켜져 있으면 체크 여부와 상관없이 같이 반영한다
   // (사용자 요청: "경사도는 해피하기 비피하기 둘 다 들어가고").
-  function slopeConsidered() {
-    return activeConditions.has('slope') || activeConditions.has('sun') || activeConditions.has('rain');
-  }
+  function slopeConsidered() { return true; }
   function combinedExposureForIdx(idx) {
     const meta = EDGE_META[idx];
     const parts = [];
@@ -1381,6 +1409,61 @@
     }
   }
 
+  // ==================== 그늘(건물 그림자) 지도 오버레이 ====================
+  // "일조량을 보여달라"는 요청 — EDGE_META의 %숫자만으로는 못 믿겠다고 하셔서, 실제로
+  // 계산에 쓰이는 건물 그림자 폴리곤(buildShadowPolygon, 노선 그래프 exposure 계산과
+  // 완전히 같은 함수)을 지도 위에 직접 그려서 눈으로 확인할 수 있게 한다. 건물
+  // 6700여 개를 다 그리면 느려지니 지금 추천 경로 근처(120m)만 그린다.
+  let shadeOverlayOn = false;
+  let shadeOverlays = [];
+  function toggleShadeOverlay() {
+    shadeOverlayOn = !shadeOverlayOn;
+    document.getElementById('shadeToggleBtn').classList.toggle('active', shadeOverlayOn);
+    renderShadeOverlay();
+  }
+  function clearShadeOverlay() {
+    shadeOverlays.forEach((o) => { if (o.remove) o.remove(); else if (o.setMap) o.setMap(null); });
+    shadeOverlays = [];
+  }
+  function nearbyBuildingsForShade() {
+    const routes = window.__lastRoutes;
+    if (!routes) return [];
+    const route = routes[selectedRouteKey] || routes.fastest;
+    const pts = nodePathToLatLng(route.nodePath);
+    const RADIUS_M = 120;
+    return BUILDINGS.filter((b) => {
+      const c = { lat: b.footprint[0][0], lng: b.footprint[0][1] };
+      return pts.some(([lat, lng]) => haversine({ lat, lng }, c) < RADIUS_M);
+    });
+  }
+  function renderShadeOverlay() {
+    clearShadeOverlay();
+    if (!shadeOverlayOn || !SUN_STATE || !SUN_STATE.isDaytime) return;
+    const polys = nearbyBuildingsForShade().map((b) => buildShadowPolygon(b, SUN_STATE.azimuth, SUN_STATE.altitude));
+    if (usingTmap && tmapMap) {
+      polys.forEach((poly) => {
+        const p = new Tmapv3.Polygon({
+          map: tmapMap, paths: poly.map(([lat, lng]) => new Tmapv3.LatLng(lat, lng)),
+          strokeOpacity: 0, fillColor: '#1a1c22', fillOpacity: 0.4,
+        });
+        shadeOverlays.push(p);
+      });
+    } else if (usingKakao && kakaoMap) {
+      polys.forEach((poly) => {
+        const p = new kakao.maps.Polygon({
+          map: kakaoMap, path: poly.map(([lat, lng]) => new kakao.maps.LatLng(lat, lng)),
+          strokeOpacity: 0, fillColor: '#1a1c22', fillOpacity: 0.4,
+        });
+        shadeOverlays.push(p);
+      });
+    } else if (leafletMap) {
+      polys.forEach((poly) => {
+        const p = L.polygon(poly, { color: 'transparent', weight: 0, fill: true, fillColor: '#1a1c22', fillOpacity: 0.4 }).addTo(leafletMap);
+        shadeOverlays.push(p);
+      });
+    }
+  }
+
   // ==================== 지도 (Leaflet 기본, 우선순위: Tmap > 카카오맵 > Leaflet) ====================
   const ROUTE_COLORS = { fastest: '#999999', balanced: '#0099ff', optimal: '#6a4cf5' };
   let leafletMap = null, routeLayerGroup = null, leafletBaseLayer = null, satelliteLayer = null;
@@ -1459,6 +1542,7 @@
     setTimeout(() => leafletMap.invalidateSize(), 200);
     if (window.__lastRoutes) renderMapRoutes(window.__lastRoutes);
     renderBusStopMarkers();
+    renderShadeOverlay();
   }
   // 카카오맵이 실패하면 Tmap을, Tmap도 안 되면 Leaflet을 순서대로 시도한다.
   let mapFellBack = false;
@@ -1532,6 +1616,7 @@
       });
       if (window.__lastRoutes) renderMapRoutes(window.__lastRoutes);
       renderBusStopMarkers();
+      renderShadeOverlay();
     } catch (e) {
       fallbackToLeaflet(e.message);
     }
@@ -1587,6 +1672,7 @@
           });
           if (window.__lastRoutes) renderMapRoutes(window.__lastRoutes);
           renderBusStopMarkers();
+          renderShadeOverlay();
         });
       } catch (e) {
         fallbackFromKakao(e.message);
@@ -1861,19 +1947,20 @@
       : `${monthEl}월 ${hourEl}시 · 밤 (해 없음)`;
   }
 
-  // ==================== 조건 칩 / 검색 ====================
+  // ==================== 날씨 토글(해/비) / 검색 ====================
+  // 해와 비는 동시에 일어나지 않는 날씨라 체크박스 여러 개보다 왼쪽/오른쪽 토글 하나로
+  // "지금 상태가 해인지 비인지"만 고르게 한다 (경사·계단은 항상 자동 반영).
   function renderChips() {
-    document.getElementById('chipRow').innerHTML = CONDITIONS.map((c) => {
-      const active = activeConditions.has(c.id);
-      return `
-      <div class="chip ${active ? 'active' : ''}" onclick="toggleCondition('${c.id}')">
-        <span class="chip-check">${active ? '✓' : ''}</span>
-        <span>${c.icon}</span><span>${c.label}</span>
+    const active = activeConditions.has('rain') ? 'rain' : 'sun';
+    document.getElementById('chipRow').innerHTML = `
+      <div class="weather-toggle ${active}">
+        <div class="weather-toggle-slider"></div>
+        <button class="weather-toggle-btn ${active === 'sun' ? 'active' : ''}" onclick="selectWeather('sun')" title="햇빛 피하기">☀️</button>
+        <button class="weather-toggle-btn ${active === 'rain' ? 'active' : ''}" onclick="selectWeather('rain')" title="비 피하기">🌧️</button>
       </div>`;
-    }).join('');
   }
-  function toggleCondition(id) {
-    if (activeConditions.has(id)) activeConditions.delete(id); else activeConditions.add(id);
+  function selectWeather(id) {
+    activeConditions = new Set([id]);
     syncSearchInputFromConditions();
     render();
   }
@@ -1884,8 +1971,8 @@
   function runSearch() {
     const text = document.getElementById('searchInput').value.trim();
     if (!text) { render(); return; }
-    const matched = CONDITIONS.filter((c) => c.keywords.some((k) => text.includes(k))).map((c) => c.id);
-    activeConditions = new Set(matched);
+    const matched = CONDITIONS.find((c) => c.keywords.some((k) => text.includes(k)));
+    if (matched) activeConditions = new Set([matched.id]);
     render();
   }
   function onLocationChange(field) { if (field) customCoords[field] = null; render(); }
@@ -2091,6 +2178,7 @@
     renderResultsHtml(routes);
     if (currentTab === '3d') renderSunDiagram(routes);
     if (busPanelOpen) renderBusPanel();
+    renderShadeOverlay();
   }
 
   // ==================== 초기화 ====================
