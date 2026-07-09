@@ -15,8 +15,8 @@ const fs = require('fs');
 const path = require('path');
 
 const OVERPASS_URL = 'https://z.overpass-api.de/api/interpreter';
-// 역삼역 · 강남파이낸스센터 · GS타워 · 테헤란로 일대
-const BBOX = { south: 37.494, west: 127.028, north: 37.506, east: 127.045 };
+// 강남역~역삼~선릉 방향 테헤란로 일대로 범위 확장 (기존 역삼동 단독 bbox 대비 약 3배 면적)
+const BBOX = { south: 37.488, west: 127.020, north: 37.514, east: 127.056 };
 
 // 한국 OSM은 보도를 별도 way로 잘 매핑하지 않고 차도 속성(sidewalk=*)으로만
 // 표시하는 경우가 많아, footway류만 쓰면 그래프가 수십 개 조각으로 끊긴다.
@@ -142,6 +142,8 @@ async function main() {
           covered: tags.covered === 'yes',
           // 횡단보도: 별도 crossing way이거나 양 끝 노드가 도로 위 crossing 지점인 경우
           crossing: wayIsCrossing || a.crossing || b.crossing,
+          // 계단: 경사·계단 회피 조건에 사용 (실측 태그, 추정 아님)
+          steps: tags.highway === 'steps',
         });
       }
     }
@@ -152,14 +154,17 @@ async function main() {
 
   const graph = { nodes: nodesOut, edges };
 
-  // 대표 지점 프리셋: 이름 있는 지점 중 서로 40m 이상 떨어진 것 위주로 최대 12개
+  // 대표 지점 프리셋: 이름 있는 지점 중 서로 40m 이상 떨어진 것 위주로, 같은 이름 중복도 제거
+  const seenNames = new Set();
   const uniquePoints = [];
   for (const p of namedPoints) {
+    if (seenNames.has(p.name)) continue;
     if (uniquePoints.some((u) => haversine(u, p) < 40)) continue;
+    seenNames.add(p.name);
     uniquePoints.push(p);
   }
   uniquePoints.sort((a, b) => (b.kind === 'station') - (a.kind === 'station'));
-  const presets = uniquePoints.slice(0, 12);
+  const presets = uniquePoints.slice(0, 24);
 
   fs.mkdirSync(path.join(__dirname, '..', 'data'), { recursive: true });
   fs.writeFileSync(

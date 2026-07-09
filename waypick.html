@@ -219,6 +219,9 @@
   .chip-row {
     display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 16px;
     scrollbar-width: none;
+    /* 칩이 넘칠 때 오른쪽 끝이 잘려 보이지 않고 스크롤 가능함을 알 수 있게 옅게 페이드 */
+    mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent 100%);
   }
   .chip-row::-webkit-scrollbar { display: none; }
   .chip {
@@ -227,8 +230,8 @@
     background: var(--surface-1); border: 1px solid var(--hairline);
     color: var(--ink-muted);
     border-radius: var(--r-pill);
-    padding: 8px 13px;
-    font-size: 12.5px; font-weight: 600;
+    padding: 7px 10px;
+    font-size: 12px; font-weight: 600;
     cursor: pointer;
     transition: all .15s;
     white-space: nowrap;
@@ -555,7 +558,7 @@
       <div class="route-detail" id="routeDetail"></div>
 
       <div class="footnote">
-        * 보행로·건물 높이: OpenStreetMap(Overpass API). 동 경계: SGIS(통계지리정보서비스) 행정동 경계 shapefile을 직접 좌표변환. 태양 방위각·고도: NOAA/SunCalc 공식(월/시각 입력값으로 실시간 계산). 월별 일조시간 평년값: 기상청 기후평년값(1991~2020, 서울). 비 노출은 실측 강수 데이터가 아니라 건물·지하도 근접도 기반 추정치입니다.
+        * 범위: 강남역~역삼~선릉 일대(테헤란로 축). 보행로·건물 높이·계단: OpenStreetMap(Overpass API, 계단은 실측 태그). 동 경계: SGIS(통계지리정보서비스) 행정동 경계 shapefile을 직접 좌표변환. 태양 방위각·고도: NOAA/SunCalc 공식(월/시각 입력값으로 실시간 계산). 월별 일조시간 평년값: 기상청 기후평년값(1991~2020, 서울). 고도·경사: Open-Elevation(SRTM), 짧은 구간의 오차를 줄이기 위해 경사율을 25%에서 제한. 비 노출은 실측 강수 데이터가 아니라 건물·지하도 근접도 기반 추정치입니다.
       </div>
     </div>
 
@@ -580,10 +583,11 @@
     VWORLD_API_KEY: '',
   };
 
-  // ==================== 조건 정의 (2개로 축소) ====================
+  // ==================== 조건 정의 ====================
   const CONDITIONS = [
-    { id: 'sun',  label: '일조량 피하기', icon: '☀️', keywords: ['햇빛', '일조', '더위', '땀', '그늘', '자외선'] },
-    { id: 'rain', label: '비 피하기',    icon: '🌧️', keywords: ['비', '우산', '장마', '젖', '강수'] },
+    { id: 'sun',   label: '햇빛 피하기', icon: '☀️', keywords: ['햇빛', '일조', '더위', '땀', '그늘', '자외선'] },
+    { id: 'rain',  label: '비 피하기',   icon: '🌧️', keywords: ['비', '우산', '장마', '젖', '강수'] },
+    { id: 'slope', label: '경사·계단',   icon: '⛰️', keywords: ['경사', '계단', '오르막', '언덕', '휠체어', '유모차', '캐리어'] },
   ];
   let activeConditions = new Set(['sun']); // 기본값: 햇빛만 ON
   let busPanelOpen = false;
@@ -808,6 +812,22 @@
     return Math.max(0.1, Math.min(1, avgDailyH / dayLenH));
   }
 
+  // 경사·계단은 시간에 따라 안 바뀌므로 그래프 로딩 시 한 번만 계산해서 재사용한다.
+  // SRTM 기반 무료 고도 API(약 30m 해상도)라 아주 짧은 구간에서는 양자화 잡음이 커서
+  // 경사율(%)을 25%에서 잘라 노이즈가 폭주하지 않게 한다 (25%면 이미 "매우 가파름" 수준).
+  const GRADE_CAP_PERCENT = 25;
+  let SLOPE_META = [];
+  function computeSlopeExposures() {
+    SLOPE_META = GRAPH.edges.map((e) => {
+      if (e.steps) return 1; // 계단은 실측 태그 그대로 최대치
+      if (e.distanceM < 0.5) return 0;
+      const a = GRAPH.nodes[e.from], b = GRAPH.nodes[e.to];
+      if (typeof a.ele !== 'number' || typeof b.ele !== 'number') return 0;
+      const gradePercent = Math.abs(a.ele - b.ele) / e.distanceM * 100;
+      return Math.min(1, gradePercent / GRADE_CAP_PERCENT);
+    });
+  }
+
   function computeExposures() {
     const dt = getSelectedDateTime();
     const pos = getSolarPosition(dt, CENTER_LAT, CENTER_LNG);
@@ -820,8 +840,8 @@
       shadowPolys = BUILDINGS.map((b) => buildShadowPolygon(b, pos.azimuth, pos.altitude));
     }
 
-    EDGE_META = GRAPH.edges.map((e) => {
-      if (e.tunnel || e.covered) return { sunExposure: 0, rainExposure: 0 };
+    EDGE_META = GRAPH.edges.map((e, idx) => {
+      if (e.tunnel || e.covered) return { sunExposure: 0, rainExposure: 0, slopeExposure: SLOPE_META[idx] };
       const a = GRAPH.nodes[e.from], b = GRAPH.nodes[e.to];
       // 짧은 엣지는 3점, 긴 엣지(30m 이상)는 5점으로 표본을 늘려 그림자 경계에서의
       // 양자화 오차(0/50/100%만 나오는 문제)를 줄인다.
@@ -851,37 +871,73 @@
       }
       const rainExposure = rainTotal / samples.length;
 
-      return { sunExposure, rainExposure };
+      return { sunExposure, rainExposure, slopeExposure: SLOPE_META[idx] };
     });
   }
 
+  // 체크된 조건 개수만큼 평균 — 조건이 늘어나도(경사 등) 그대로 확장되는 구조
   function combinedExposureForIdx(idx) {
     const meta = EDGE_META[idx];
-    const sunOn = activeConditions.has('sun');
-    const rainOn = activeConditions.has('rain');
-    const sunPart = sunOn ? meta.sunExposure * (SUN_STATE.isDaytime ? SUN_STATE.monthProb : 0) : 0;
-    const rainPart = rainOn ? meta.rainExposure : 0;
-    if (sunOn && rainOn) return 0.5 * sunPart + 0.5 * rainPart;
-    return sunOn ? sunPart : rainOn ? rainPart : 0;
+    const parts = [];
+    if (activeConditions.has('sun')) parts.push(meta.sunExposure * (SUN_STATE.isDaytime ? SUN_STATE.monthProb : 0));
+    if (activeConditions.has('rain')) parts.push(meta.rainExposure);
+    if (activeConditions.has('slope')) parts.push(meta.slopeExposure);
+    if (!parts.length) return 0;
+    return parts.reduce((a, b) => a + b, 0) / parts.length;
   }
 
-  // ==================== Dijkstra ====================
+  // ==================== Dijkstra (이진 힙) ====================
+  // 지역 범위를 넓히면서 그래프가 커져(노드 7000+) 선형 탐색으로 최소값을 찾으면
+  // 매번 O(V)라 경로 하나 계산에 O(V^2)가 든다. 이진 힙으로 O((V+E) log V)로 낮춘다.
+  class MinHeap {
+    constructor() { this.a = []; }
+    get size() { return this.a.length; }
+    push(item) {
+      const a = this.a; a.push(item);
+      let i = a.length - 1;
+      while (i > 0) {
+        const p = (i - 1) >> 1;
+        if (a[p][0] <= a[i][0]) break;
+        [a[p], a[i]] = [a[i], a[p]]; i = p;
+      }
+    }
+    pop() {
+      const a = this.a; const top = a[0]; const last = a.pop();
+      if (a.length) {
+        a[0] = last;
+        let i = 0;
+        while (true) {
+          const l = i * 2 + 1, r = i * 2 + 2; let smallest = i;
+          if (l < a.length && a[l][0] < a[smallest][0]) smallest = l;
+          if (r < a.length && a[r][0] < a[smallest][0]) smallest = r;
+          if (smallest === i) break;
+          [a[smallest], a[i]] = [a[i], a[smallest]]; i = smallest;
+        }
+      }
+      return top;
+    }
+  }
   function dijkstra(startId, endId, weightFn) {
     const dist = new Map(), prevNode = new Map(), prevEdge = new Map(), visited = new Set();
-    for (const id in GRAPH.nodes) dist.set(id, Infinity);
     dist.set(startId, 0);
-    while (true) {
-      let u = null, best = Infinity;
-      for (const [id, d] of dist) { if (!visited.has(id) && d < best) { best = d; u = id; } }
-      if (u === null || u === endId) break;
+    const heap = new MinHeap();
+    heap.push([0, startId]);
+    while (heap.size) {
+      const [d, u] = heap.pop();
+      if (visited.has(u)) continue;
+      if (u === endId) break;
+      if (d > (dist.get(u) ?? Infinity)) continue;
       visited.add(u);
       for (const { to, idx } of ADJ.get(u) || []) {
         if (visited.has(to)) continue;
-        const nd = dist.get(u) + weightFn(idx);
-        if (nd < dist.get(to)) { dist.set(to, nd); prevNode.set(to, u); prevEdge.set(to, idx); }
+        const nd = d + weightFn(idx);
+        if (nd < (dist.get(to) ?? Infinity)) {
+          dist.set(to, nd); prevNode.set(to, u); prevEdge.set(to, idx);
+          heap.push([nd, to]);
+        }
       }
     }
-    if (dist.get(endId) === Infinity) return null;
+    if (!dist.has(endId)) return null;
     const nodePath = [endId], edgePath = [];
     let cur = endId;
     while (cur !== startId) {
@@ -895,13 +951,14 @@
   function pathDistance(edgePath) { return edgePath.reduce((s, idx) => s + GRAPH.edges[idx].distanceM, 0); }
   function pathAvgExposure(edgePath) {
     const dist = pathDistance(edgePath) || 1;
-    let sun = 0, rain = 0;
+    let sun = 0, rain = 0, slope = 0;
     for (const idx of edgePath) {
       const w = GRAPH.edges[idx].distanceM / dist;
       sun += EDGE_META[idx].sunExposure * w;
       rain += EDGE_META[idx].rainExposure * w;
+      slope += EDGE_META[idx].slopeExposure * w;
     }
-    return { sun, rain };
+    return { sun, rain, slope };
   }
   function routeInfo(edgePath, nodePath) {
     const distanceM = pathDistance(edgePath);
@@ -1277,6 +1334,10 @@
       const pct = Math.max(0, Math.round((fastest.rain - route.rain) / Math.max(fastest.rain, 0.01) * 100));
       fragments.push(`비 노출 <b>${pct}%↓</b>`);
     }
+    if (activeConditions.has('slope')) {
+      const pct = Math.max(0, Math.round((fastest.slope - route.slope) / Math.max(fastest.slope, 0.01) * 100));
+      fragments.push(`경사·계단 <b>${pct}%↓</b>`);
+    }
     if (!fragments.length) return `빠른 길과 거의 같은 경로예요.`;
     if (deltaTime <= 0) return `빠른 길과 시간은 비슷한데 ${fragments.join(' · ')} 이에요.`;
     return `빠른 길보다 <b>${deltaTime}분</b> 더 걸리지만 ${fragments.join(' · ')} 이에요.`;
@@ -1307,6 +1368,7 @@
     const stats = [];
     if (activeConditions.has('sun')) stats.push(`<div class="stat-chip key"><span>☀️</span><span>햇빛 ${Math.round(route.sun * 100)}%</span></div>`);
     if (activeConditions.has('rain')) stats.push(`<div class="stat-chip key"><span>🌧️</span><span>비 ${Math.round(route.rain * 100)}%</span></div>`);
+    if (activeConditions.has('slope')) stats.push(`<div class="stat-chip key"><span>⛰️</span><span>경사·계단 ${Math.round(route.slope * 100)}%</span></div>`);
     document.getElementById('routeDetail').innerHTML = `
       <div class="result-top">
         <span class="badge ${isRecommended ? 'rec' : ''}">${isRecommended ? '추천' : ROUTE_LABELS[key]}</span>
@@ -1376,6 +1438,7 @@
     GRAPH = graph; BUILDINGS = buildings; PRESETS = presets; DONG_BOUNDARY = dongBoundary;
     ADJ = buildAdjacency(GRAPH);
     BUILD_GRID = buildGrid(BUILDINGS);
+    computeSlopeExposures();
 
     populateTimeSelects();
     populatePresetList();
