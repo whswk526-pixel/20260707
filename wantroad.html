@@ -253,7 +253,7 @@
     background: var(--surface-1);
     border: 1px solid var(--hairline-soft);
     border-radius: var(--r-lg);
-    height: 220px;
+    height: 268px;
     margin-bottom: 16px;
     overflow: hidden;
   }
@@ -337,7 +337,7 @@
     background: var(--surface-1);
     border: 1px solid var(--hairline-soft);
     border-radius: var(--r-lg);
-    height: 220px;
+    height: 268px;
     margin-bottom: 16px;
     overflow: hidden;
   }
@@ -357,19 +357,27 @@
   .section-head h2 { font-size: 15px; font-weight: 700; margin: 0; }
   .section-head .mode-tag { font-size: 11px; color: var(--accent-blue); font-weight: 600; }
 
-  /* ---------- Route result cards ---------- */
-  .results { display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px; }
-  .result-card {
-    background: var(--surface-1);
-    border: 1px solid var(--hairline);
-    border-radius: var(--r-lg);
-    padding: 14px;
-    position: relative;
-    transition: border-color .15s;
+  /* ---------- Route picker (티맵/네이버지도 스타일 압축 탭 + 상세 패널) ---------- */
+  .route-picker { display: flex; gap: 8px; margin-bottom: 10px; }
+  .route-pick-btn {
+    flex: 1; cursor: pointer;
+    background: var(--surface-1); border: 1.5px solid var(--hairline);
+    border-radius: var(--r-md); padding: 10px 8px;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    transition: border-color .15s, background .15s, transform .1s;
   }
-  .result-card.recommended {
-    border-color: var(--accent-blue);
-    background: linear-gradient(180deg, rgba(0,153,255,0.08), rgba(0,153,255,0.02));
+  .route-pick-btn:active { transform: scale(0.97); }
+  .route-pick-btn .rp-dot { width: 7px; height: 7px; border-radius: 50%; margin-bottom: 1px; }
+  .route-pick-btn .rp-time { font-size: 18px; font-weight: 800; letter-spacing: -0.4px; color: var(--ink); }
+  .route-pick-btn .rp-time span { font-size: 10.5px; font-weight: 600; color: var(--ink-muted); margin-left: 1px; }
+  .route-pick-btn .rp-label { font-size: 10.5px; font-weight: 600; color: var(--ink-muted); }
+  .route-pick-btn.selected { border-color: var(--accent-blue); background: rgba(0,153,255,0.08); }
+  .route-pick-btn.selected .rp-label { color: var(--accent-blue); }
+  .route-pick-btn.recommended .rp-label::before { content: '⭐ '; }
+
+  .route-detail {
+    background: var(--surface-1); border: 1px solid var(--hairline-soft);
+    border-radius: var(--r-lg); padding: 14px; margin-bottom: 18px;
   }
   .result-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
   .badge {
@@ -498,7 +506,8 @@
       <span class="mode-tag" id="modeTag">균형 추천</span>
     </div>
 
-    <div class="results" id="resultsBox"></div>
+    <div class="route-picker" id="routePicker"></div>
+    <div class="route-detail" id="routeDetail"></div>
 
     <div class="footnote">
       * 보행로·건물 높이: OpenStreetMap(Overpass API). 동 경계: SGIS(통계지리정보서비스) 행정동 경계 shapefile을 직접 좌표변환. 태양 방위각·고도: NOAA/SunCalc 공식(월/시각 입력값으로 실시간 계산). 월별 일조시간 평년값: 기상청 기후평년값(1991~2020, 서울). 비 노출은 실측 강수 데이터가 아니라 건물·지하도 근접도 기반 추정치입니다.
@@ -1195,32 +1204,48 @@
     if (deltaTime <= 0) return `빠른 길과 시간은 비슷한데 ${fragments.join(' · ')} 이에요.`;
     return `빠른 길보다 <b>${deltaTime}분</b> 더 걸리지만 ${fragments.join(' · ')} 이에요.`;
   }
-  function renderCard(key, route, fastest, recommendedKey) {
+  const ROUTE_LABELS = { fastest: '빠른 길', balanced: '균형', optimal: '최적' };
+
+  // 티맵/네이버지도처럼: 3개 옵션은 압축된 탭으로, 상세 정보는 선택된 것만 아래에 펼쳐서 보여준다
+  function renderRoutePicker(routes, recommendedKey) {
+    const order = ['fastest', 'balanced', 'optimal'];
+    document.getElementById('routePicker').innerHTML = order.map((key) => {
+      const route = routes[key];
+      const isRec = key === recommendedKey;
+      const isSel = key === selectedRouteKey;
+      return `
+        <div class="route-pick-btn ${isSel ? 'selected' : ''} ${isRec ? 'recommended' : ''}" onclick="selectRoute('${key}')">
+          <span class="rp-dot" style="background:${ROUTE_COLORS[key]}"></span>
+          <span class="rp-time">${route.time}<span>분</span></span>
+          <span class="rp-label">${ROUTE_LABELS[key]}</span>
+        </div>
+      `;
+    }).join('');
+  }
+  function renderRouteDetail(routes, recommendedKey) {
+    const key = selectedRouteKey;
+    const route = routes[key], fastest = routes.fastest;
     const isRecommended = key === recommendedKey;
-    const isSelected = key === selectedRouteKey;
     const deltaTime = route.time - fastest.time;
-    const badgeText = key === 'fastest' ? '가장 빠른 길' : key === 'optimal' ? '최적' : '균형';
     const stats = [];
     if (activeConditions.has('sun')) stats.push(`<div class="stat-chip key"><span>☀️</span><span>햇빛 ${Math.round(route.sun * 100)}%</span></div>`);
     if (activeConditions.has('rain')) stats.push(`<div class="stat-chip key"><span>🌧️</span><span>비 ${Math.round(route.rain * 100)}%</span></div>`);
-    return `
-      <div class="result-card ${isRecommended ? 'recommended' : ''}" onclick="selectRoute('${key}')" style="cursor:pointer; ${isSelected ? 'outline:1.5px solid var(--accent-blue);' : ''}">
-        <div class="result-top">
-          <span class="badge ${isRecommended ? 'rec' : ''}">${isRecommended ? '추천' : badgeText}</span>
-          <div style="display:flex;align-items:baseline;gap:8px;">
-            <div class="time-block"><span class="num">${route.time}</span><span class="unit">분</span></div>
-            <span class="time-delta ${deltaTime > 0 ? 'plus' : 'zero'}">${deltaTime > 0 ? '+' + deltaTime + '분' : '최단'}</span>
-          </div>
+    document.getElementById('routeDetail').innerHTML = `
+      <div class="result-top">
+        <span class="badge ${isRecommended ? 'rec' : ''}">${isRecommended ? '추천' : ROUTE_LABELS[key]}</span>
+        <div style="display:flex;align-items:baseline;gap:8px;">
+          <div class="time-block"><span class="num">${route.time}</span><span class="unit">분</span></div>
+          <span class="time-delta ${deltaTime > 0 ? 'plus' : 'zero'}">${deltaTime > 0 ? '+' + deltaTime + '분' : '최단'}</span>
         </div>
-        <div class="insight">${buildInsight(key, route, fastest)}</div>
-        ${stats.length ? `<div class="stat-grid">${stats.join('')}</div>` : ''}
       </div>
+      <div class="insight">${buildInsight(key, route, fastest)}</div>
+      ${stats.length ? `<div class="stat-grid">${stats.join('')}</div>` : ''}
     `;
   }
   function renderResultsHtml(routes) {
     const recommendedKey = activeConditions.size ? 'optimal' : 'fastest';
-    const order = ['fastest', 'balanced', 'optimal'];
-    document.getElementById('resultsBox').innerHTML = order.map((k) => renderCard(k, routes[k], routes.fastest, recommendedKey)).join('');
+    renderRoutePicker(routes, recommendedKey);
+    renderRouteDetail(routes, recommendedKey);
   }
 
   // ==================== 메인 렌더 ====================
@@ -1239,7 +1264,8 @@
 
     const routes = computeThreeRoutes(startId, endId);
     if (!routes) {
-      document.getElementById('resultsBox').innerHTML = '<div class="footnote">이 두 지점을 잇는 보행 경로를 찾지 못했어요. 다른 지점을 선택해보세요.</div>';
+      document.getElementById('routePicker').innerHTML = '';
+      document.getElementById('routeDetail').innerHTML = '<div class="footnote">이 두 지점을 잇는 보행 경로를 찾지 못했어요. 다른 지점을 선택해보세요.</div>';
       return;
     }
     if (!['fastest', 'balanced', 'optimal'].includes(selectedRouteKey)) selectedRouteKey = 'optimal';
