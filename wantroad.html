@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WANTROAD — 내가 원하는 길을 고르다</title>
+<title>WAYPICK — 내가 원하는 길을 고르다</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
@@ -247,6 +247,27 @@
   .bus-chance.mid { background: rgba(255,122,61,0.15); color: var(--gradient-orange); }
   .bus-chance.low { background: rgba(255,85,119,0.15); color: var(--gradient-coral); }
 
+  /* ---------- 지도 히어로 (지도가 먼저, 검색은 그 위에 플로팅) ---------- */
+  .map-hero { position: relative; margin: 0 -18px 14px; }
+  .floating-tabs {
+    position: absolute; left: 14px; bottom: 26px; z-index: 500;
+    display: flex; gap: 4px; background: rgba(9,9,9,0.78); border-radius: var(--r-pill);
+    padding: 3px; backdrop-filter: blur(4px);
+  }
+  .ftab {
+    cursor: pointer; font-size: 11px; font-weight: 700; color: var(--ink-muted);
+    padding: 6px 12px; border-radius: var(--r-pill); transition: all .15s;
+  }
+  .ftab.active { background: var(--ink); color: var(--on-primary); }
+  .floating-search {
+    position: absolute; left: 14px; right: 14px; top: 14px; z-index: 500;
+  }
+  .floating-search .route-card {
+    background: rgba(20,20,20,0.88); backdrop-filter: blur(8px);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.06);
+    margin-bottom: 0;
+  }
+
   /* ---------- Real map (Leaflet) ---------- */
   .map-box {
     position: relative;
@@ -257,9 +278,10 @@
     margin-bottom: 16px;
     overflow: hidden;
   }
+  .map-box.hero, .diagram-box.hero { height: 380px; margin-bottom: 0; border-radius: 0; border-left: none; border-right: none; }
   #leafletMap { width: 100%; height: 100%; background: var(--surface-1); }
   .map-legend {
-    position: absolute; right: 8px; top: 8px; z-index: 500;
+    position: absolute; right: 8px; bottom: 8px; z-index: 500;
     display: flex; flex-direction: column; align-items: flex-end; gap: 5px; pointer-events: none;
   }
   .map-legend span {
@@ -272,10 +294,11 @@
     width: 12px; height: 0; border-radius: 0; border-top: 1.5px dashed #8a8f9a; background: none;
   }
   .map-hint {
-    position: absolute; left: 8px; top: 8px; z-index: 500;
-    font-size: 10px; font-weight: 700; padding: 5px 10px; border-radius: var(--r-pill);
-    background: rgba(0,153,255,0.85); color: #fff; display: none; align-items: center; gap: 5px;
-    animation: pulseHint 1.4s ease-in-out infinite;
+    position: absolute; left: 50%; bottom: 54px; z-index: 501;
+    transform: translateX(-50%); width: max-content; max-width: calc(100% - 90px);
+    font-size: 11px; font-weight: 700; padding: 7px 12px; border-radius: var(--r-pill);
+    background: rgba(0,153,255,0.9); color: #fff; display: none; align-items: center; justify-content: center; gap: 5px;
+    animation: pulseHint 1.4s ease-in-out infinite; text-align: center;
   }
   .map-hint.show { display: flex; }
   @keyframes pulseHint { 0%,100% { opacity: 1; } 50% { opacity: 0.65; } }
@@ -318,16 +341,7 @@
   }
   .night-note.show { display: block; }
 
-  /* ---------- 2D/3D 탭 ---------- */
-  .tab-row { display: flex; gap: 6px; margin-bottom: 8px; }
-  .tab-btn {
-    flex: 1; text-align: center; cursor: pointer;
-    background: var(--surface-1); color: var(--ink-muted);
-    border: 1px solid var(--hairline); border-radius: var(--r-pill);
-    padding: 7px 0; font-size: 12px; font-weight: 700;
-    transition: all .15s;
-  }
-  .tab-btn.active { background: var(--ink); color: var(--on-primary); border-color: var(--ink); }
+  /* ---------- 2D/3D 탭 (플로팅 버튼은 .floating-tabs/.ftab, 패널 표시 전환만 여기서) ---------- */
   .tab-panel { display: none; }
   .tab-panel.active { display: block; }
 
@@ -436,27 +450,52 @@
 
     <div class="top-nav">
       <div class="wordmark">
-        <span class="mark">WANT<span class="accent">ROAD</span></span>
+        <span class="mark">WAY<span class="accent">PICK</span></span>
       </div>
       <div style="display:flex; align-items:center; gap:6px;">
         <a class="bus-toggle-btn" href="index.html" style="text-decoration:none;">🎲 LOTTO</a>
         <button class="bus-toggle-btn" id="busToggleBtn" onclick="toggleBusPanel()">🚌 버스 도우미</button>
       </div>
     </div>
-    <div class="slogan" style="margin-bottom:16px;">내가 원하는 길을 고르다</div>
+    <div class="slogan" style="margin-bottom:12px;">내가 원하는 길을 고르다</div>
 
-    <div class="route-card">
-      <div class="route-dots">
-        <div class="dot origin" id="originDot" onclick="armPicking('origin')" title="눌러서 지도에서 출발지 찍기"></div>
-        <div class="dot-line"></div>
-        <div class="dot dest" id="destDot" onclick="armPicking('dest')" title="눌러서 지도에서 도착지 찍기"></div>
+    <!-- 지도를 맨 위에 두고 검색/탭은 그 위에 떠 있는 카드로 — 티맵/네이버지도처럼 지도가 먼저 보이게 -->
+    <div class="map-hero">
+      <div class="tab-panel active" id="tab2dPanel">
+        <div class="map-box hero">
+          <div class="map-legend" id="mapLegend"></div>
+          <div class="map-hint" id="mapHint"></div>
+          <div id="leafletMap"></div>
+          <div id="kakaoMap" style="width:100%; height:100%; display:none;"></div>
+        </div>
       </div>
-      <div class="route-fields">
-        <input id="originInput" list="placeList" value="역삼" placeholder="출발지" onchange="onLocationChange('origin')">
-        <input id="destInput" list="placeList" value="강남파이낸스센터" placeholder="도착지" onchange="onLocationChange('dest')">
+      <div class="tab-panel" id="tab3dPanel">
+        <div class="diagram-box hero">
+          <div id="sunDiagram"></div>
+          <div class="diagram-caption" id="diagramCaption">건물·태양 위치 모식도</div>
+        </div>
       </div>
-      <datalist id="placeList"></datalist>
-      <button class="swap-btn" onclick="swapLocations()" title="출발지·도착지 바꾸기">⇅</button>
+
+      <div class="floating-tabs">
+        <div class="ftab active" id="tab2dBtn" onclick="switchTab('2d')">🗺️ 2D</div>
+        <div class="ftab" id="tab3dBtn" onclick="switchTab('3d')">🏙️ 3D</div>
+      </div>
+
+      <div class="floating-search">
+        <div class="route-card">
+          <div class="route-dots">
+            <div class="dot origin" id="originDot" onclick="armPicking('origin')" title="눌러서 지도에서 출발지 찍기"></div>
+            <div class="dot-line"></div>
+            <div class="dot dest" id="destDot" onclick="armPicking('dest')" title="눌러서 지도에서 도착지 찍기"></div>
+          </div>
+          <div class="route-fields">
+            <input id="originInput" list="placeList" value="역삼" placeholder="출발지" onchange="onLocationChange('origin')">
+            <input id="destInput" list="placeList" value="강남파이낸스센터" placeholder="도착지" onchange="onLocationChange('dest')">
+          </div>
+          <datalist id="placeList"></datalist>
+          <button class="swap-btn" onclick="swapLocations()" title="출발지·도착지 바꾸기">⇅</button>
+        </div>
+      </div>
     </div>
     <div class="pick-hint">📍 출발지·도착지 앞 점을 누르면 지도를 클릭해서 위치를 찍을 수 있어요</div>
 
@@ -481,26 +520,6 @@
       <div id="busStopList"></div>
     </div>
 
-    <div class="tab-row">
-      <div class="tab-btn active" id="tab2dBtn" onclick="switchTab('2d')">🗺️ 2D 지도</div>
-      <div class="tab-btn" id="tab3dBtn" onclick="switchTab('3d')">🏙️ 3D 모식도</div>
-    </div>
-
-    <div class="tab-panel active" id="tab2dPanel">
-      <div class="map-box">
-        <div class="map-legend" id="mapLegend"></div>
-        <div class="map-hint" id="mapHint"></div>
-        <div id="leafletMap"></div>
-        <div id="kakaoMap" style="width:100%; height:100%; display:none;"></div>
-      </div>
-    </div>
-    <div class="tab-panel" id="tab3dPanel">
-      <div class="diagram-box">
-        <div id="sunDiagram"></div>
-        <div class="diagram-caption" id="diagramCaption">건물·태양 위치 모식도</div>
-      </div>
-    </div>
-
     <div class="section-head">
       <h2>추천 경로</h2>
       <span class="mode-tag" id="modeTag">균형 추천</span>
@@ -522,7 +541,7 @@
   // developers.kakao.com 에서 발급받은 JavaScript 키를 넣으면 카카오맵으로 전환됩니다.
   // 비어있으면 키 없이 되는 Leaflet+OSM/Carto 지도를 그대로 사용합니다.
   const CONFIG = {
-    KAKAO_JS_KEY: '',
+    KAKAO_JS_KEY: '268479ed7c37ff0bb7739e36e854586b',
     // sgis.kostat.go.kr Open API에서 발급받은 값 (배경지도/통계주제도용, 현재 미사용)
     SGIS_CONSUMER_KEY: '',
     SGIS_CONSUMER_SECRET: '',
@@ -940,7 +959,7 @@
   const ROUTE_COLORS = { fastest: '#999999', balanced: '#0099ff', optimal: '#6a4cf5' };
   let leafletMap = null, routeLayerGroup = null;
   let kakaoMap = null, kakaoOverlays = [];
-  const usingKakao = !!CONFIG.KAKAO_JS_KEY;
+  let usingKakao = !!CONFIG.KAKAO_JS_KEY;
 
   // ==================== 지도 클릭으로 출발/도착 지정 ====================
   let customCoords = { origin: null, dest: null };
@@ -970,7 +989,15 @@
 
   function initMap() {
     if (usingKakao) { loadKakaoMap(); return; }
-    leafletMap = L.map('leafletMap', { zoomControl: true, attributionControl: true }).setView([CENTER_LAT, CENTER_LNG], 16);
+    initLeaflet();
+  }
+  function initLeaflet() {
+    document.getElementById('kakaoMap').style.display = 'none';
+    document.getElementById('leafletMap').style.display = 'block';
+    // 지도 위에 검색창/탭이 플로팅으로 떠 있어서 상단 코너가 가려지므로 기본 확대/축소 버튼은
+    // 끄고(핀치/휠 줌은 그대로 동작) 저작권 표기만 하단 왼쪽(플로팅 탭 옆)으로 옮긴다.
+    leafletMap = L.map('leafletMap', { zoomControl: false, attributionControl: true }).setView([CENTER_LAT, CENTER_LNG], 16);
+    leafletMap.attributionControl.setPosition('bottomleft');
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       subdomains: 'abcd', maxZoom: 19, attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
     }).addTo(leafletMap);
@@ -985,35 +1012,52 @@
     }
     leafletMap.on('click', (e) => onMapPointPicked(e.latlng.lat, e.latlng.lng));
     setTimeout(() => leafletMap.invalidateSize(), 200);
+    if (window.__lastRoutes) renderMapRoutes(window.__lastRoutes);
+  }
+  // 카카오맵이 (도메인 미등록 등으로) 로드에 실패하면 화면이 비지 않도록 Leaflet로 자동 전환한다.
+  let kakaoFellBack = false;
+  function fallbackToLeaflet(reason) {
+    if (kakaoFellBack) return;
+    kakaoFellBack = true;
+    usingKakao = false;
+    console.warn('카카오맵 로드 실패, Leaflet 지도로 대체합니다:', reason);
+    initLeaflet();
   }
   function loadKakaoMap() {
     document.getElementById('leafletMap').style.display = 'none';
     document.getElementById('kakaoMap').style.display = 'block';
     const script = document.createElement('script');
     script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${CONFIG.KAKAO_JS_KEY}&autoload=false`;
+    script.onerror = () => fallbackToLeaflet('script load error (도메인 미등록일 가능성)');
     script.onload = () => {
-      kakao.maps.load(() => {
-        kakaoMap = new kakao.maps.Map(document.getElementById('kakaoMap'), {
-          center: new kakao.maps.LatLng(CENTER_LAT, CENTER_LNG), level: 4,
-        });
-        if (DONG_BOUNDARY) {
-          for (const dong of DONG_BOUNDARY) {
-            for (const ring of dong.rings) {
-              new kakao.maps.Polygon({
-                map: kakaoMap,
-                path: ring.map(([lat, lng]) => new kakao.maps.LatLng(lat, lng)),
-                strokeWeight: 1, strokeColor: '#8a8f9a', strokeOpacity: 0.45, strokeStyle: 'shortdot', fillOpacity: 0,
-              });
+      try {
+        kakao.maps.load(() => {
+          kakaoMap = new kakao.maps.Map(document.getElementById('kakaoMap'), {
+            center: new kakao.maps.LatLng(CENTER_LAT, CENTER_LNG), level: 4,
+          });
+          if (DONG_BOUNDARY) {
+            for (const dong of DONG_BOUNDARY) {
+              for (const ring of dong.rings) {
+                new kakao.maps.Polygon({
+                  map: kakaoMap,
+                  path: ring.map(([lat, lng]) => new kakao.maps.LatLng(lat, lng)),
+                  strokeWeight: 1, strokeColor: '#8a8f9a', strokeOpacity: 0.45, strokeStyle: 'shortdot', fillOpacity: 0,
+                });
+              }
             }
           }
-        }
-        kakao.maps.event.addListener(kakaoMap, 'click', (mouseEvent) => {
-          onMapPointPicked(mouseEvent.latLng.getLat(), mouseEvent.latLng.getLng());
+          kakao.maps.event.addListener(kakaoMap, 'click', (mouseEvent) => {
+            onMapPointPicked(mouseEvent.latLng.getLat(), mouseEvent.latLng.getLng());
+          });
+          if (window.__lastRoutes) renderMapRoutes(window.__lastRoutes);
         });
-        if (window.__lastRoutes) renderMapRoutes(window.__lastRoutes);
-      });
+      } catch (e) {
+        fallbackToLeaflet(e.message);
+      }
     };
     document.head.appendChild(script);
+    // 스크립트 자체는 로드됐지만 kakao.maps.load 콜백이 끝내 안 오는 경우(예: 인증 실패 후 조용히 멈춤) 대비
+    setTimeout(() => { if (!kakaoMap) fallbackToLeaflet('타임아웃 (5초 내 지도 생성 안 됨)'); }, 5000);
   }
   function dotIcon(color) {
     return L.divIcon({ className: '', html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #090909;box-shadow:0 0 0 2px ${color}55;"></div>`, iconSize: [14, 14], iconAnchor: [7, 7] });
