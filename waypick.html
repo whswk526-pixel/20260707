@@ -197,6 +197,41 @@
     cursor: pointer; font-size: 13px; flex-shrink: 0;
   }
   .swap-btn:hover { color: var(--ink); }
+  .find-route-btn {
+    width: 100%; margin-top: 8px; padding: 11px 0;
+    background: var(--accent-blue); color: #fff; border: none;
+    border-radius: var(--r-md); font-family: inherit; font-size: 13px; font-weight: 700;
+    cursor: pointer; transition: opacity .15s;
+  }
+  .find-route-btn:hover { opacity: 0.9; }
+  .find-route-btn:active { opacity: 0.8; }
+
+  .station-map-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .station-map-btn {
+    background: var(--surface-2); color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: var(--r-pill); padding: 6px 12px; font-family: inherit; font-size: 11.5px;
+    font-weight: 600; cursor: pointer;
+  }
+  .station-map-btn:hover { border-color: var(--accent-blue); }
+  .station-map-modal {
+    display: none; position: fixed; inset: 0; z-index: 1000;
+    background: rgba(0,0,0,0.6); align-items: center; justify-content: center; padding: 24px;
+  }
+  .station-map-modal.show { display: flex; }
+  .station-map-sheet {
+    background: var(--surface-1); border-radius: var(--r-lg); max-width: 480px; width: 100%;
+    max-height: 85vh; display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  }
+  .station-map-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 16px; border-bottom: 1px solid var(--hairline); font-weight: 700; font-size: 14px;
+  }
+  .station-map-head button {
+    background: none; border: none; font-size: 16px; color: var(--ink-muted); cursor: pointer; padding: 4px;
+  }
+  .station-map-body { overflow: auto; padding: 12px; }
+  .station-map-body img { width: 100%; height: auto; display: block; border-radius: var(--r-sm); }
 
   /* ---------- Search box ---------- */
   .search-box {
@@ -562,12 +597,13 @@
             <div class="dot dest" id="destDot" onclick="armPicking('dest')" title="눌러서 지도에서 도착지 찍기"></div>
           </div>
           <div class="route-fields">
-            <input id="originInput" list="placeList" value="역삼" placeholder="출발지" onchange="onLocationChange('origin')">
-            <input id="destInput" list="placeList" value="강남파이낸스센터" placeholder="도착지" onchange="onLocationChange('dest')">
+            <input id="originInput" list="placeList" value="역삼역" placeholder="출발지 검색 (역, 건물, 주소 등)" autocomplete="off" oninput="onSearchInput('origin')" onchange="onLocationChange('origin')" onkeydown="if(event.key==='Enter') findRoute()">
+            <input id="destInput" list="placeList" value="강남파이낸스센터" placeholder="도착지 검색 (역, 건물, 주소 등)" autocomplete="off" oninput="onSearchInput('dest')" onchange="onLocationChange('dest')" onkeydown="if(event.key==='Enter') findRoute()">
           </div>
           <datalist id="placeList"></datalist>
           <button class="swap-btn" onclick="swapLocations()" title="출발지·도착지 바꾸기">⇅</button>
         </div>
+        <button class="find-route-btn" onclick="findRoute()">🔍 경로 탐색</button>
         <div class="pick-hint">📍 점을 누르면 지도를 클릭해서 위치를 찍을 수 있어요</div>
       </div>
     </div>
@@ -612,6 +648,16 @@
       </div>
     </div>
 
+  </div>
+</div>
+
+<div class="station-map-modal" id="stationMapModal" onclick="if(event.target===this) closeStationMap()">
+  <div class="station-map-sheet">
+    <div class="station-map-head">
+      <span id="stationMapTitle"></span>
+      <button onclick="closeStationMap()">✕</button>
+    </div>
+    <div class="station-map-body"><img id="stationMapImg" alt="역 내부 안내도"></div>
   </div>
 </div>
 
@@ -822,6 +868,12 @@
   // ==================== 데이터 로딩 ====================
   let GRAPH = null, BUILDINGS = null, PRESETS = null, DONG_BOUNDARY = null, ADJ = null;
   const CENTER_LAT = 37.500, CENTER_LNG = 127.0365;
+  // scripts/fetch_yeoksam_data.js의 BBOX와 동일 — 데이터가 실제로 커버하는 범위를 지도에 표시
+  const COVERAGE_BBOX = { south: 37.488, west: 127.020, north: 37.514, east: 127.056 };
+  const COVERAGE_RING = [
+    [COVERAGE_BBOX.south, COVERAGE_BBOX.west], [COVERAGE_BBOX.south, COVERAGE_BBOX.east],
+    [COVERAGE_BBOX.north, COVERAGE_BBOX.east], [COVERAGE_BBOX.north, COVERAGE_BBOX.west],
+  ];
   const WALK_SPEED_MPS = 1.25;
 
   // graph.edges[].from/to는 JSON에서 숫자로 오지만 GRAPH.nodes 키(및 Map 기반 순회)는
@@ -841,10 +893,70 @@
   function displayName(p) {
     return p.kind === 'station' && !/역$|출구$/.test(p.name) ? p.name + '역' : p.name;
   }
-  function findPresetCoord(name) {
+
+  // ==================== 실시간 장소 검색 (Tmap POI 검색 API) ====================
+  // 예전엔 미리 뽑아둔 24개 프리셋 안에서만 골라야 했다 — 이제 입력하는 대로
+  // Tmap의 실제 장소 데이터베이스를 검색해서 어디든 찾을 수 있게 한다.
+  const searchResultsCache = { origin: [], dest: [] };
+  const searchDebounce = {};
+  async function searchPlaces(keyword) {
+    if (!CONFIG.TMAP_APP_KEY || !keyword || keyword.trim().length < 2) return [];
+    try {
+      const url = `https://apis.openapi.sk.com/tmap/pois?version=1&searchKeyword=${encodeURIComponent(keyword)}` +
+        `&resCoordType=WGS84GEO&reqCoordType=WGS84GEO&count=8&centerLon=${CENTER_LNG}&centerLat=${CENTER_LAT}&radius=8&reqCoordType=WGS84GEO`;
+      const res = await fetch(url, { headers: { appKey: CONFIG.TMAP_APP_KEY, Accept: 'application/json' } });
+      if (!res.ok) return [];
+      const data = await res.json();
+      const pois = (data.searchPoiInfo && data.searchPoiInfo.pois && data.searchPoiInfo.pois.poi) || [];
+      return pois.map((p) => ({
+        name: p.name,
+        lat: parseFloat(p.noorLat || p.frontLat),
+        lng: parseFloat(p.noorLon || p.frontLon),
+        addr: [p.roadName, p.firstBuildNo].filter(Boolean).join(' ') || [p.upperAddrName, p.middleAddrName, p.lowerAddrName].filter(Boolean).join(' '),
+      })).filter((r) => Number.isFinite(r.lat) && Number.isFinite(r.lng));
+    } catch (e) {
+      console.warn('장소 검색 실패:', e.message);
+      return [];
+    }
+  }
+  function renderPlaceList() {
+    const seen = new Set();
+    const options = [];
+    for (const field of ['origin', 'dest']) {
+      for (const r of searchResultsCache[field]) {
+        if (seen.has(r.name)) continue;
+        seen.add(r.name);
+        options.push(`<option value="${r.name}">${r.addr || ''}</option>`);
+      }
+    }
+    for (const p of PRESETS) {
+      const name = displayName(p);
+      if (seen.has(name)) continue;
+      seen.add(name);
+      options.push(`<option value="${name}">`);
+    }
+    document.getElementById('placeList').innerHTML = options.join('');
+  }
+  function onSearchInput(field) {
+    clearTimeout(searchDebounce[field]);
+    const inputId = field === 'origin' ? 'originInput' : 'destInput';
+    const keyword = document.getElementById(inputId).value;
+    searchDebounce[field] = setTimeout(async () => {
+      searchResultsCache[field] = await searchPlaces(keyword);
+      renderPlaceList();
+    }, 300);
+  }
+
+  // 검색 결과 캐시 -> 프리셋 순으로 찾고, 아무 데서도 못 찾으면 null(= 화면에 "위치를 찾을 수 없어요" 표시)
+  function resolveLocationCoord(name, field) {
     const trimmed = (name || '').trim();
-    const p = PRESETS.find((x) => displayName(x) === trimmed) || PRESETS[0];
-    return { lat: p.lat, lng: p.lng };
+    if (!trimmed) return null;
+    const fromSearch = (searchResultsCache[field] || []).find((r) => r.name === trimmed);
+    if (fromSearch) return { lat: fromSearch.lat, lng: fromSearch.lng };
+    // "역삼"처럼 표시명("역삼역")의 "역" 접미사를 뺀 형태로 쳐도 찾을 수 있게 느슨하게 비교
+    const p = PRESETS.find((x) => displayName(x) === trimmed || x.name === trimmed);
+    if (p) return { lat: p.lat, lng: p.lng };
+    return null;
   }
   function nearestNodeId(lat, lng) {
     let best = null, bestD = Infinity;
@@ -1043,20 +1155,29 @@
     };
   }
 
+  // 한국 OSM은 보도를 따로 안 그리는 경우가 많아 차도(생활도로~간선도로)를 안 쓰면
+  // 그래프가 끊긴다. 그렇다고 페널티 없이 쓰면 차도 한복판을 따라 걷는 것처럼 그려지므로,
+  // "가장 빠른 길"을 포함한 모든 경로 계산의 기본 바탕으로 보도·횡단보도를 우선하고
+  // 차도는 꼭 필요할 때만(연결이 그 길밖에 없을 때) 쓰도록 기본 가중치를 둔다.
+  const VEHICLE_ROAD_PENALTY = 0.6;
+  function baseWalkWeight(idx) {
+    const e = GRAPH.edges[idx];
+    return e.distanceM * (1 + (e.vehicleRoad ? VEHICLE_ROAD_PENALTY : 0));
+  }
   function computeThreeRoutes(startId, endId) {
-    const fastestRun = dijkstra(startId, endId, (idx) => GRAPH.edges[idx].distanceM);
+    const fastestRun = dijkstra(startId, endId, (idx) => baseWalkWeight(idx));
     if (!fastestRun) return null;
     const fastest = routeInfo(fastestRun.edgePath, fastestRun.nodePath);
 
     if (activeConditions.size === 0) return { fastest, balanced: fastest, optimal: fastest };
 
-    const balancedRun = dijkstra(startId, endId, (idx) => GRAPH.edges[idx].distanceM * (1 + combinedExposureForIdx(idx) * 1.4));
+    const balancedRun = dijkstra(startId, endId, (idx) => baseWalkWeight(idx) * (1 + combinedExposureForIdx(idx) * 1.4));
     const balanced = balancedRun ? routeInfo(balancedRun.edgePath, balancedRun.nodePath) : fastest;
 
     const candidates = [3.0, 2.2, 1.6, 1.0];
     let optimal = balanced;
     for (const m of candidates) {
-      const run = dijkstra(startId, endId, (idx) => GRAPH.edges[idx].distanceM * (1 + combinedExposureForIdx(idx) * m));
+      const run = dijkstra(startId, endId, (idx) => baseWalkWeight(idx) * (1 + combinedExposureForIdx(idx) * m));
       if (!run) continue;
       const info = routeInfo(run.edgePath, run.nodePath);
       if (info.distanceM / fastest.distanceM <= 1.45) { optimal = info; break; }
@@ -1179,6 +1300,8 @@
         }
       }
     }
+    // 데이터가 실제로 커버하는 범위 — 이 밖은 검색은 되지만 길찾기는 안 됨
+    L.polygon(COVERAGE_RING, { color: '#0099ff', weight: 1.5, opacity: 0.5, fill: false, dashArray: '6,6' }).addTo(leafletMap);
     leafletMap.on('click', (e) => onMapPointPicked(e.latlng.lat, e.latlng.lng));
     setTimeout(() => leafletMap.invalidateSize(), 200);
     if (window.__lastRoutes) renderMapRoutes(window.__lastRoutes);
@@ -1218,6 +1341,12 @@
           }
         }
       }
+      // 데이터가 실제로 커버하는 범위 — 이 밖은 검색은 되지만 길찾기는 안 됨
+      new Tmapv3.Polygon({
+        map: tmapMap,
+        paths: COVERAGE_RING.map(([lat, lng]) => new Tmapv3.LatLng(lat, lng)),
+        strokeColor: '#0099ff', strokeWeight: 1.5, strokeOpacity: 0.5, fillOpacity: 0,
+      });
       // Tmap Vector JS 클릭 이벤트 payload 형식이 문서로 확인이 안 돼서, 대신 지도 컨테이너의
       // 원시 DOM 클릭 좌표를 받아 확인된 API인 screenToReal()로 좌표 변환한다 (더 안전한 방법).
       const mapDiv = document.getElementById('tmapMap');
@@ -1567,6 +1696,7 @@
     render();
   }
   function onLocationChange(field) { if (field) customCoords[field] = null; render(); }
+  function findRoute() { render(); }
   function swapLocations() {
     const o = document.getElementById('originInput'), d = document.getElementById('destInput');
     const tmp = o.value; o.value = d.value; d.value = tmp;
@@ -1684,6 +1814,20 @@
       `;
     }).join('');
   }
+  // 지원 범위 안에 실제 역 이용안내도가 있는 역만 (서울교통공사 1~8호선 공개자료 기준 —
+  // 신분당선/수인분당선/9호선 쪽 역들은 다른 운영사라 이 자료에 없음)
+  const STATION_MAPS = {
+    '강남역': 'data/station_maps/강남역.jpg',
+    '역삼역': 'data/station_maps/역삼역.jpg',
+    '선릉역': 'data/station_maps/선릉역.jpg',
+  };
+  function showStationMap(name) {
+    document.getElementById('stationMapImg').src = STATION_MAPS[name];
+    document.getElementById('stationMapTitle').textContent = name + ' 내부 안내도';
+    document.getElementById('stationMapModal').classList.add('show');
+  }
+  function closeStationMap() { document.getElementById('stationMapModal').classList.remove('show'); }
+
   function renderRouteDetail(routes, recommendedKey) {
     const key = selectedRouteKey;
     const route = routes[key], fastest = routes.fastest;
@@ -1693,6 +1837,12 @@
     if (activeConditions.has('sun')) stats.push(`<div class="stat-chip key"><span>☀️</span><span>햇빛 ${Math.round(route.sun * 100)}%</span></div>`);
     if (activeConditions.has('rain')) stats.push(`<div class="stat-chip key"><span>🌧️</span><span>비 ${Math.round(route.rain * 100)}%</span></div>`);
     if (slopeConsidered()) stats.push(`<div class="stat-chip key"><span>⛰️</span><span>경사·계단 ${Math.round(route.slope * 100)}%</span></div>`);
+    const originVal = document.getElementById('originInput').value.trim();
+    const destVal = document.getElementById('destInput').value.trim();
+    const stationButtons = [originVal, destVal]
+      .filter((v) => STATION_MAPS[v])
+      .map((v) => `<button class="station-map-btn" onclick="showStationMap('${v}')">🚉 ${v} 내부 안내도</button>`)
+      .join('');
     document.getElementById('routeDetail').innerHTML = `
       <div class="result-top">
         <span class="badge ${isRecommended ? 'rec' : ''}">${isRecommended ? '추천' : ROUTE_LABELS[key]}</span>
@@ -1703,6 +1853,7 @@
       </div>
       <div class="insight">${buildInsight(key, route, fastest)}</div>
       ${stats.length ? `<div class="stat-grid">${stats.join('')}</div>` : ''}
+      ${stationButtons ? `<div class="station-map-row">${stationButtons}</div>` : ''}
     `;
   }
   function renderResultsHtml(routes) {
@@ -1720,10 +1871,21 @@
 
     const origin = document.getElementById('originInput').value;
     const dest = document.getElementById('destInput').value;
-    const oCoord = customCoords.origin || findPresetCoord(origin);
-    const dCoord = customCoords.dest || findPresetCoord(dest);
+    const oCoord = customCoords.origin || resolveLocationCoord(origin, 'origin');
+    const dCoord = customCoords.dest || resolveLocationCoord(dest, 'dest');
+    if (!oCoord || !dCoord) {
+      document.getElementById('routePicker').innerHTML = '';
+      document.getElementById('routeDetail').innerHTML = `<div class="footnote">${!oCoord ? '출발지' : '도착지'}를 찾을 수 없어요. 검색 결과 목록에서 골라주세요.</div>`;
+      return;
+    }
     const startId = nearestNodeId(oCoord.lat, oCoord.lng);
     const endId = nearestNodeId(dCoord.lat, dCoord.lng);
+    const OUT_OF_COVERAGE_M = 700;
+    if (haversine(oCoord, GRAPH.nodes[startId]) > OUT_OF_COVERAGE_M || haversine(dCoord, GRAPH.nodes[endId]) > OUT_OF_COVERAGE_M) {
+      document.getElementById('routePicker').innerHTML = '';
+      document.getElementById('routeDetail').innerHTML = '<div class="footnote">지원 범위(강남역~역삼~선릉 일대) 밖의 위치예요. 이 범위 안에서 검색해주세요.</div>';
+      return;
+    }
 
     const routes = computeThreeRoutes(startId, endId);
     if (!routes) {

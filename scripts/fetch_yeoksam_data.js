@@ -144,6 +144,12 @@ async function main() {
           crossing: wayIsCrossing || a.crossing || b.crossing,
           // 계단: 경사·계단 회피 조건에 사용 (실측 태그, 추정 아님)
           steps: tags.highway === 'steps',
+          // 턴바이턴 안내용 도로명 (없는 도로가 많음 — 그런 구간은 null로 두고 안내 문구를 다르게 만든다)
+          road: tags.name || null,
+          // 차도(생활도로~간선도로)인지 여부. 한국 OSM은 보도를 따로 안 그려서 차도를 안 넣으면
+          // 그래프가 끊기지만, 그렇다고 아무 페널티 없이 쓰면 차도 한복판을 따라 걷는 것처럼
+          // 그려진다. footway/pedestrian/path/living_street/steps/횡단보도는 차도가 아님으로 표시.
+          vehicleRoad: /^(residential|unclassified|tertiary|secondary|primary|service)$/.test(tags.highway) && !wayIsCrossing,
         });
       }
     }

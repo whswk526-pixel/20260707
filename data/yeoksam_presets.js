@@ -124,5 +124,23 @@ window.WAYPICK_PRESETS = [
     "lat": 37.5003098,
     "lng": 127.036903,
     "kind": "building"
+  },
+  {
+    "name": "NemusTech",
+    "lat": 37.5028064,
+    "lng": 127.0490285,
+    "kind": "building"
+  },
+  {
+    "name": "한신인터밸리24빌딩",
+    "lat": 37.5034187,
+    "lng": 127.0463624,
+    "kind": "building"
+  },
+  {
+    "name": "아이온빌딩",
+    "lat": 37.4982358,
+    "lng": 127.032928,
+    "kind": "building"
   }
 ];
