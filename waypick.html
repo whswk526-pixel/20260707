@@ -1316,17 +1316,27 @@
     for (const r of results) { if (r.distanceM < fastest.distanceM) fastest = r; }
 
     const fastestExposure = routeCombinedExposure(fastest);
-    let optimal = null, balanced = null;
-    for (const info of results) {
-      const detourOk = info.distanceM / fastest.distanceM <= 1.45;
-      const improved = routeCombinedExposure(info) <= fastestExposure + 0.002;
-      if (detourOk && improved) {
-        if (!optimal) optimal = info;
-        balanced = info;
-      }
+    const feasible = results.filter((info) => (
+      info.distanceM / fastest.distanceM <= 1.45 && routeCombinedExposure(info) <= fastestExposure + 0.002
+    ));
+    // "최적"은 fastest보다 못하지 않은 후보들 중 노출도가 가장 낮은(=가장 그늘/처마를
+    // 많이 타는) 것 — candidates가 강한 배수부터 담겨 있으니 첫 성공이 아니라 노출도
+    // 최소값을 직접 고른다(전부 같은 경로로 수렴하는 경우가 많아 결과는 비슷하지만,
+    // "최적 = 가능한 한 그늘로"라는 의미를 명확히 하기 위해).
+    let optimal = fastest;
+    if (feasible.length) {
+      optimal = feasible.reduce((best, r) => (routeCombinedExposure(r) < routeCombinedExposure(best) ? r : best), feasible[0]);
     }
-    if (!optimal) optimal = fastest;
-    if (!balanced) balanced = fastest;
+    // "균형"은 fastest(회피 0%)와 optimal(최대 회피) 사이의 중간값에 가장 가까운 후보 —
+    // "빠른 길과 그늘 길 사이 어디쯤"이라는 사용자 기대에 맞춘 것.
+    const optimalExposure = routeCombinedExposure(optimal);
+    const targetExposure = (fastestExposure + optimalExposure) / 2;
+    let balanced = fastest;
+    if (feasible.length) {
+      balanced = feasible.reduce((best, r) => (
+        Math.abs(routeCombinedExposure(r) - targetExposure) < Math.abs(routeCombinedExposure(best) - targetExposure) ? r : best
+      ), feasible[0]);
+    }
     return { fastest, balanced, optimal };
   }
 
@@ -1473,8 +1483,12 @@
   function nearbyBuildingsForShade() {
     const routes = window.__lastRoutes;
     if (!routes) return [];
-    const route = routes[selectedRouteKey] || routes.fastest;
-    const pts = nodePathToLatLng(route.nodePath);
+    // 선택된 경로 하나만 기준으로 하면 카드를 바꿀 때마다 그늘이 안 보이던 건물이
+    // 갑자기 나타나는 등 헷갈려서, 3개 경로(빠른/균형/최적) 전체를 합친 범위로 통일
+    // 했다 — 어떤 카드를 보고 있든 그 검색의 전체 반경 그늘이 같이 보인다.
+    const pts = ['fastest', 'balanced', 'optimal']
+      .filter((k) => routes[k])
+      .flatMap((k) => nodePathToLatLng(routes[k].nodePath));
     const RADIUS_M = 300;
     return BUILDINGS.filter((b) => {
       // 첫 꼭짓점 하나만 보고 거리 판정을 하면, 큰 건물은 첫 꼭짓점이 경로에서 멀어도
@@ -1530,9 +1544,10 @@
   }
 
   // ==================== 지도 (Leaflet 기본, 우선순위: Tmap > 카카오맵 > Leaflet) ====================
-  // 빠른 길이 옅은 회색 40% 투명도라 지도 배경에 거의 안 보인다는 지적을 받아서, 색을
-  // 더 진하게(#999999 -> #5a6270) 하고 비추천 경로 투명도도 0.4 -> 0.75로 올렸다.
-  const ROUTE_COLORS = { fastest: '#5a6270', balanced: '#0099ff', optimal: '#6a4cf5' };
+  // "3개 경로 색이 완전 다르게 구분되게" — 파랑/보라는 서로 톤이 가까워서 지도
+  // 배경(파란 커버리지 테두리, 버스 정류장 등)과도 헷갈릴 수 있어 채도·색상환이 뚜렷이
+  // 다른 3색으로: 빠른(짙은 슬레이트) / 균형(주황) / 최적(보라).
+  const ROUTE_COLORS = { fastest: '#5a6270', balanced: '#ff9500', optimal: '#8b3ffa' };
   let leafletMap = null, routeLayerGroup = null, leafletBaseLayer = null, satelliteLayer = null;
   let kakaoMap = null, kakaoOverlays = [];
   let tmapMap = null, tmapOverlays = [];
@@ -1763,7 +1778,25 @@
   }
   // 색이 바뀌는 지점에서만 나눠서, 엣지 하나당 폴리라인 하나씩 만들지 않게 한다
   // (지도 API마다 오버레이가 많아지면 확대/축소가 느려짐 — Tmap에서 실측된 문제).
-  function routeSegments(route, useSunColor) {
+  // "코스가 같으면 겹쳐서 하나만 보인다"는 지적 — 세 경로가 같은 구간을 지나면 그중
+  // 하나(맨 위에 그려진 것)만 보이고 나머지 색은 완전히 가려진다. 경로마다 고정된
+  // 방향으로 살짝(3m) 옆으로 밀어서, 겹치는 구간에서도 3개 선이 나란히 다 보이게 한다.
+  const ROUTE_OFFSET_M = { fastest: -3, balanced: 0, optimal: 3 };
+  function offsetPathMeters(points, offsetM) {
+    if (!offsetM || points.length < 2) return points;
+    const mPerDegLat = 110540;
+    return points.map(([lat, lng], i) => {
+      const mPerDegLng = 111320 * Math.cos(lat * Math.PI / 180);
+      const prev = points[Math.max(0, i - 1)];
+      const next = points[Math.min(points.length - 1, i + 1)];
+      const dx = (next[1] - prev[1]) * mPerDegLng;
+      const dy = (next[0] - prev[0]) * mPerDegLat;
+      const len = Math.hypot(dx, dy) || 1;
+      const px = dy / len, py = -dx / len; // 진행 방향 기준 오른쪽 수직 벡터
+      return [lat + (py * offsetM) / mPerDegLat, lng + (px * offsetM) / mPerDegLng];
+    });
+  }
+  function routeSegments(route, useSunColor, offsetM) {
     const runs = [];
     let cur = null;
     for (let i = 0; i < route.nodePath.length - 1; i++) {
@@ -1777,12 +1810,17 @@
       }
     }
     if (cur) runs.push(cur);
+    if (offsetM) runs.forEach((r) => { r.points = offsetPathMeters(r.points, offsetM); });
     return runs;
   }
 
   function renderMapRoutes(routes) {
     window.__lastRoutes = routes;
-    const recKey = activeConditions.size ? 'optimal' : 'fastest';
+    // 지도에서 강조할 경로는 "알고리즘이 추천하는 것"이 아니라 "사용자가 지금 카드를
+    // 눌러서 보고 있는 것"이어야 한다 — 예전엔 카드를 눌러도 지도 강조가 안 바뀌었다.
+    const recKey = ['fastest', 'balanced', 'optimal'].includes(selectedRouteKey)
+      ? selectedRouteKey
+      : (activeConditions.size ? 'optimal' : 'fastest');
     const colorBySun = activeConditions.has('sun');
     if (usingTmap) {
       if (!tmapMap) return;
@@ -1793,7 +1831,7 @@
           const r = routes[key];
           const isRec = key === recKey;
           if (isRec && colorBySun) {
-            for (const seg of routeSegments(r, true)) {
+            for (const seg of routeSegments(r, true, ROUTE_OFFSET_M[key])) {
               const line = new Tmapv3.Polyline({
                 path: seg.points.map(([lat, lng]) => new Tmapv3.LatLng(lat, lng)),
                 strokeColor: seg.color, strokeWeight: 6, strokeOpacity: 0.95, map: tmapMap,
@@ -1802,10 +1840,10 @@
             }
             return;
           }
-          const path = nodePathToLatLng(r.nodePath).map(([lat, lng]) => new Tmapv3.LatLng(lat, lng));
+          const path = offsetPathMeters(nodePathToLatLng(r.nodePath), ROUTE_OFFSET_M[key]).map(([lat, lng]) => new Tmapv3.LatLng(lat, lng));
           const line = new Tmapv3.Polyline({
-            path, strokeColor: ROUTE_COLORS[key], strokeWeight: isRec ? 6 : 4,
-            strokeOpacity: isRec ? 0.95 : 0.75, map: tmapMap,
+            path, strokeColor: ROUTE_COLORS[key], strokeWeight: isRec ? 6 : 3,
+            strokeOpacity: isRec ? 0.95 : 0.5, map: tmapMap,
           });
           tmapOverlays.push(line);
         });
@@ -1837,8 +1875,8 @@
       ['optimal', 'balanced', 'fastest'].forEach((key) => {
         const r = routes[key];
         const isRec = key === recKey;
-        const path = nodePathToLatLng(r.nodePath).map(([lat, lng]) => new kakao.maps.LatLng(lat, lng));
-        const line = new kakao.maps.Polyline({ map: kakaoMap, path, strokeWeight: isRec ? 5 : 4, strokeColor: ROUTE_COLORS[key], strokeOpacity: isRec ? 0.95 : 0.75, strokeStyle: isRec ? 'solid' : 'shortdash' });
+        const path = offsetPathMeters(nodePathToLatLng(r.nodePath), ROUTE_OFFSET_M[key]).map(([lat, lng]) => new kakao.maps.LatLng(lat, lng));
+        const line = new kakao.maps.Polyline({ map: kakaoMap, path, strokeWeight: isRec ? 5 : 3, strokeColor: ROUTE_COLORS[key], strokeOpacity: isRec ? 0.95 : 0.5, strokeStyle: isRec ? 'solid' : 'shortdash' });
         kakaoOverlays.push(line);
       });
       const bounds = new kakao.maps.LatLngBounds();
@@ -1852,13 +1890,13 @@
       const r = routes[key];
       const isRec = key === recKey;
       if (isRec && colorBySun) {
-        for (const seg of routeSegments(r, true)) {
+        for (const seg of routeSegments(r, true, ROUTE_OFFSET_M[key])) {
           L.polyline(seg.points, { color: seg.color, weight: 5, opacity: 0.95, lineCap: 'round' }).addTo(routeLayerGroup);
         }
         return;
       }
-      L.polyline(nodePathToLatLng(r.nodePath), {
-        color: ROUTE_COLORS[key], weight: isRec ? 5 : 4, opacity: isRec ? 0.95 : 0.75, dashArray: isRec ? null : '2,8', lineCap: 'round',
+      L.polyline(offsetPathMeters(nodePathToLatLng(r.nodePath), ROUTE_OFFSET_M[key]), {
+        color: ROUTE_COLORS[key], weight: isRec ? 5 : 3, opacity: isRec ? 0.95 : 0.5, dashArray: isRec ? null : '2,8', lineCap: 'round',
       }).addTo(routeLayerGroup);
     });
     const allLatLng = nodePathToLatLng(routes.fastest.nodePath);
@@ -2177,6 +2215,7 @@
     selectedRouteKey = key;
     if (window.__lastRoutes) {
       renderResultsHtml(window.__lastRoutes);
+      renderMapRoutes(window.__lastRoutes);
       if (currentTab === '3d') renderSunDiagram(window.__lastRoutes);
     }
   }
