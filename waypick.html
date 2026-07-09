@@ -396,6 +396,10 @@
     font-size: 11px; font-weight: 700; padding: 7px 12px; border-radius: var(--r-pill);
     background: rgba(0,153,255,0.92); color: #fff; display: none; align-items: center; justify-content: center; gap: 5px;
     animation: pulseHint 1.4s ease-in-out infinite; text-align: center;
+    /* 지도 한가운데(사용자가 가장 클릭하기 쉬운 자리)에 떠 있는 안내 배지가 그 밑의
+       지도 클릭 자체를 가로채고 있었다("Tmap에서 지도 찍기가 안 됨" 원인) — 정보 표시용
+       이지 클릭 대상이 아니므로 클릭이 그대로 지도로 통과하게 한다. */
+    pointer-events: none;
   }
   .map-hint.show { display: flex; }
   @keyframes pulseHint { 0%,100% { opacity: 1; } 50% { opacity: 0.65; } }
@@ -1602,8 +1606,8 @@
   // 막히는 식이라, 어떻게 여느냐에 따라 카카오/Tmap이 랜덤하게 갈리는 문제가 있었다.
   // Tmap 키는 file://·localhost 양쪽 다 이 세션에서 실측으로 매번 성공했으니 먼저 쓴다.
   function initMap() {
-    if (tmapAvailable()) { usingTmap = true; loadTmapMap(); return; }
     if (CONFIG.KAKAO_JS_KEY) { loadKakaoMap(); return; }
+    if (tmapAvailable()) { usingTmap = true; loadTmapMap(); return; }
     initLeaflet();
   }
   function initLeaflet() {
@@ -1873,21 +1877,16 @@
         ['optimal', 'balanced', 'fastest'].forEach((key) => {
           const r = routes[key];
           const isRec = key === recKey;
-          if (isRec && colorBySun) {
-            for (const seg of routeSegments(r, true, ROUTE_OFFSET_M[key])) {
-              const line = new Tmapv3.Polyline({
-                path: seg.points.map(([lat, lng]) => new Tmapv3.LatLng(lat, lng)),
-                strokeColor: seg.color, strokeWeight: 6, strokeOpacity: 0.95, map: tmapMap,
-              });
-              tmapOverlays.push(line);
-            }
-            return;
-          }
+          // 예전엔 선택된(추천) 경로만 햇빛 노출도 색(주황/빨강/파랑)으로 덧칠했는데,
+          // 그러면 "경로마다 고유 색이 보여야 한다"는 요청과 정면으로 부딪혀서 — 선택된
+          // 경로가 어느 조건이든 그냥 주황 계열로만 보이는 것처럼 느껴졌다. 노출도 색은
+          // 빼고 3경로 모두 항상 자기 고유 색(빠른/균형/최적)으로 그린다.
           const path = offsetPathMeters(nodePathToLatLng(r.nodePath), ROUTE_OFFSET_M[key]).map(([lat, lng]) => new Tmapv3.LatLng(lat, lng));
           const line = new Tmapv3.Polyline({
             path, strokeColor: ROUTE_COLORS[key], strokeWeight: isRec ? 6 : 3,
             strokeOpacity: isRec ? 0.95 : 0.5, map: tmapMap,
           });
+          if (line.on) line.on('click', () => { if (!pickingField) selectRoute(key); });
           tmapOverlays.push(line);
         });
         const allLatLng = nodePathToLatLng(routes.fastest.nodePath);
@@ -1900,11 +1899,7 @@
       } catch (e) {
         console.warn('Tmap 경로 표시 실패:', e.message);
       }
-      document.getElementById('mapLegend').innerHTML = colorBySun ? `
-        <span><i class="sw" style="background:#ff5a1f"></i>햇빛 많음</span>
-        <span><i class="sw" style="background:#ffb020"></i>보통</span>
-        <span><i class="sw" style="background:#0099ff"></i>그늘</span>
-      ` : `
+      document.getElementById('mapLegend').innerHTML = `
         <span><i class="sw" style="background:${ROUTE_COLORS.fastest}"></i>빠른</span>
         <span><i class="sw" style="background:${ROUTE_COLORS.balanced}"></i>균형</span>
         <span><i class="sw" style="background:${ROUTE_COLORS.optimal}"></i>최적</span>
@@ -1920,6 +1915,7 @@
         const isRec = key === recKey;
         const path = offsetPathMeters(nodePathToLatLng(r.nodePath), ROUTE_OFFSET_M[key]).map(([lat, lng]) => new kakao.maps.LatLng(lat, lng));
         const line = new kakao.maps.Polyline({ map: kakaoMap, path, strokeWeight: isRec ? 5 : 3, strokeColor: ROUTE_COLORS[key], strokeOpacity: isRec ? 0.95 : 0.5, strokeStyle: isRec ? 'solid' : 'shortdash' });
+        kakao.maps.event.addListener(line, 'click', () => { if (!pickingField) selectRoute(key); });
         kakaoOverlays.push(line);
       });
       const bounds = new kakao.maps.LatLngBounds();
@@ -1932,27 +1928,16 @@
     ['optimal', 'balanced', 'fastest'].forEach((key) => {
       const r = routes[key];
       const isRec = key === recKey;
-      if (isRec && colorBySun) {
-        for (const seg of routeSegments(r, true, ROUTE_OFFSET_M[key])) {
-          L.polyline(seg.points, { color: seg.color, weight: 5, opacity: 0.95, lineCap: 'round' }).addTo(routeLayerGroup);
-        }
-        return;
-      }
       L.polyline(offsetPathMeters(nodePathToLatLng(r.nodePath), ROUTE_OFFSET_M[key]), {
         color: ROUTE_COLORS[key], weight: isRec ? 5 : 3, opacity: isRec ? 0.95 : 0.5, dashArray: isRec ? null : '2,8', lineCap: 'round',
-      }).addTo(routeLayerGroup);
+      }).on('click', () => { if (!pickingField) selectRoute(key); }).addTo(routeLayerGroup);
     });
     const allLatLng = nodePathToLatLng(routes.fastest.nodePath);
     L.marker(allLatLng[0], { icon: dotIcon('#0099ff') }).addTo(routeLayerGroup);
     L.marker(allLatLng[allLatLng.length - 1], { icon: dotIcon('#ff5577') }).addTo(routeLayerGroup);
     leafletMap.fitBounds(L.latLngBounds(allLatLng), { padding: [26, 26] });
 
-    document.getElementById('mapLegend').innerHTML = colorBySun ? `
-      <span><i class="sw" style="background:#ff5a1f"></i>햇빛 많음</span>
-      <span><i class="sw" style="background:#ffb020"></i>보통</span>
-      <span><i class="sw" style="background:#0099ff"></i>그늘</span>
-      <span><i class="sw boundary"></i>동 경계</span>
-    ` : `
+    document.getElementById('mapLegend').innerHTML = `
       <span><i class="sw" style="background:${ROUTE_COLORS.fastest}"></i>빠른</span>
       <span><i class="sw" style="background:${ROUTE_COLORS.balanced}"></i>균형</span>
       <span><i class="sw" style="background:${ROUTE_COLORS.optimal}"></i>최적</span>
