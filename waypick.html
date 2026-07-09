@@ -594,6 +594,7 @@
       <div class="tab-panel" id="tab3dPanel">
         <div class="diagram-box">
           <div id="sunDiagram"></div>
+          <div id="vworld3dMap" style="display:none; width:100%; height:100%;"></div>
         </div>
       </div>
     </div>
@@ -713,6 +714,38 @@
 -->
 <script src="https://apis.openapi.sk.com/tmap/vectorjs?version=1&appKey=29KXFOvgtQ8P1pyMPn8yybASpgcnje8NNA7ZgZ00" onerror="window.__tmapScriptFailed=true"></script>
 <!--
+  V-World WS3D는 Tmap과 같은 이유(내부적으로 document.write로 하위 스크립트를 끼워
+  넣음)로 반드시 파서가 처리하는 시점에 삽입돼야 한다 — 그래서 <script>를 그냥 두는
+  대신, 파싱 중에 동기적으로 실행되는 인라인 스크립트에서 document.write로 써 넣는다
+  (이것도 여전히 "파싱 중"이라 정적 태그와 동일하게 동작하고, Tmap 때 겪은 "동적으로
+  만든 <script>에서 document.write 호출 시 에러"와는 다른 경우).
+  file://에서는 애초에 태그 자체를 안 써서(location.protocol이 http가 아니면 생략)
+  로드를 시도조차 안 한다 — 처음엔 "항상 로드해도 무해하다"고 생각했는데, 실제로는
+  V-World SDK가 인증 실패 시 document.write로 끼워 넣은 하위 스크립트 안에서 곧바로
+  alert() 팝업을 띄운다는 걸 실사용 중 발견해서(파일로 열 때마다 "[인증실패]...URI가
+  일치하지 않습니다" 팝업이 뜸), file://에서는 아예 스크립트 자체를 안 넣도록 바꿨다.
+-->
+<script>
+  if (location.protocol.indexOf('http') === 0) {
+    // 도메인 등록이 아직 반영 전이거나 다른 포트/주소로 열었을 때도 V-World SDK가
+    // 같은 alert() 팝업을 띄운다. 그 경우도 화면을 막지 않도록, 로드 초반 몇 초간은
+    // alert를 가로채서 "인증" 관련 문구만 조용히 콘솔로 돌리고 나머지는 그대로 통과시킨다.
+    const realAlert = window.alert;
+    window.alert = function (msg) {
+      if (typeof msg === 'string' && (msg.indexOf('인증') !== -1 || msg.indexOf('API Key') !== -1)) {
+        console.warn('V-World 인증 알림(팝업 대신 콘솔로):', msg);
+        window.__vworldScriptFailed = true;
+        return;
+      }
+      realAlert(msg);
+    };
+    setTimeout(() => { window.alert = realAlert; }, 10000);
+    document.write('<scr' + 'ipt src="https://map.vworld.kr/js/webglMapInit.js.do?version=3.0&apiKey=A1125D7D-5A98-33AD-BF93-A3906ED54F9A" onerror="window.__vworldScriptFailed=true"></scr' + 'ipt>');
+  } else {
+    window.__vworldScriptFailed = true;
+  }
+</script>
+<!--
   데이터는 fetch()가 아니라 <script src>로 불러온다. file://로 더블클릭해서 열면
   fetch/XHR는 "origin null" CORS 에러로 막히지만, 로컬 <script src>는 막히지 않는다 —
   서버 없이 그냥 파일을 열어도 되게 하기 위한 선택. data/*.js는
@@ -737,7 +770,7 @@
     SGIS_CONSUMER_SECRET: '',
     // vworld.kr(국토교통부 공간정보 오픈플랫폼)에서 발급받은 인증키를 넣으면
     // 실제 3D 건물 지도(Cesium 기반)로 전환됩니다. 비어있으면 현재의 SVG 모식도를 사용합니다.
-    VWORLD_API_KEY: '',
+    VWORLD_API_KEY: 'A1125D7D-5A98-33AD-BF93-A3906ED54F9A',
   };
 
   // ==================== 조건 정의 ====================
@@ -1251,9 +1284,12 @@
     return parts.reduce((a, b) => a + b, 0) / parts.length;
   }
   function computeThreeRoutes(startId, endId) {
+    // "빠른 길"도 차도 회피(횡단보도 아닌 곳에서 차도를 가로지르는 걸 막는 역할)는
+    // 그대로 적용한다 — 진짜 보행자라면 차도 한복판을 걷거나 무단횡단하는 경로가
+    // "가장 빠른 길"일 리 없기 때문("이건 도보 기준이야 차가 아니고").
     const fastestRun = dijkstra(startId, endId, (idx) => baseWalkWeight(idx));
     if (!fastestRun) return null;
-    const fastest = routeInfo(fastestRun.edgePath, fastestRun.nodePath);
+    let fastest = routeInfo(fastestRun.edgePath, fastestRun.nodePath);
 
     if (activeConditions.size === 0) return { fastest, balanced: fastest, optimal: fastest };
 
@@ -1267,12 +1303,21 @@
     // 아무 배수도 개선을 못 찾으면(진짜 대안이 없는 경우) 억지로 나쁜 길을 보여주지 않고
     // fastest를 그대로 보여준다.
     const candidates = [80, 40, 20, 12, 6, 3, 1.4];
-    const fastestExposure = routeCombinedExposure(fastest);
-    let optimal = null, balanced = null;
+    const results = [];
     for (const m of candidates) {
       const run = dijkstra(startId, endId, (idx) => weightedEdgeCost(idx, m));
-      if (!run) continue;
-      const info = routeInfo(run.edgePath, run.nodePath);
+      if (run) results.push(routeInfo(run.edgePath, run.nodePath));
+    }
+    // fastest와 balanced/optimal은 서로 다른 가중치로 각자 최적을 찾기 때문에, 회피
+    // 탐색 쪽이 우연히 fastest보다 실제 거리(=시간)가 더 짧은 경로를 찾아내는 경우가
+    // 드물게 있다 — 그러면 "빠른 길이 최적/균형보다 오래 걸린다"는 앞뒤가 안 맞는
+    // 상황이 되므로, 그런 경우엔 그 경로를 새 fastest로 삼아 항상
+    // fastest 시간 ≤ balanced 시간 ≤ optimal 시간이 유지되게 한다.
+    for (const r of results) { if (r.distanceM < fastest.distanceM) fastest = r; }
+
+    const fastestExposure = routeCombinedExposure(fastest);
+    let optimal = null, balanced = null;
+    for (const info of results) {
       const detourOk = info.distanceM / fastest.distanceM <= 1.45;
       const improved = routeCombinedExposure(info) <= fastestExposure + 0.002;
       if (detourOk && improved) {
@@ -1430,42 +1475,64 @@
     if (!routes) return [];
     const route = routes[selectedRouteKey] || routes.fastest;
     const pts = nodePathToLatLng(route.nodePath);
-    const RADIUS_M = 120;
+    const RADIUS_M = 300;
     return BUILDINGS.filter((b) => {
-      const c = { lat: b.footprint[0][0], lng: b.footprint[0][1] };
-      return pts.some(([lat, lng]) => haversine({ lat, lng }, c) < RADIUS_M);
+      // 첫 꼭짓점 하나만 보고 거리 판정을 하면, 큰 건물은 첫 꼭짓점이 경로에서 멀어도
+      // 나머지 절반은 가까울 수 있어서 "분명 건물이 있는데 그늘이 안 뜬다"는 빈 구멍이
+      // 생긴다. 발자국 중심(무게중심)으로 판정해서 건물 전체 위치를 대표하게 한다.
+      const cLat = b.footprint.reduce((s, p) => s + p[0], 0) / b.footprint.length;
+      const cLng = b.footprint.reduce((s, p) => s + p[1], 0) / b.footprint.length;
+      return pts.some(([lat, lng]) => haversine({ lat, lng }, { lat: cLat, lng: cLng }) < RADIUS_M);
     });
   }
+  // buildShadowPolygon()은 "건물 발자국 ∪ 그림자 끝쪽으로 민 발자국"의 convex hull이라
+  // 건물 자체 면적도 그 안에 포함된다 — 그늘 판정(점이 이 폴리곤 안에 있나)엔 문제 없지만
+  // 지도에 그대로 그리면 "그림자가 아니라 건물이 통째로 칠해진" 것처럼 보인다는 지적을
+  // 받았다. 그래서 건물 자체(진하고 불투명)와 그 건물이 드리우는 그림자 영역(옅고 다른
+  // 색)을 따로 겹쳐 그려서, 어느 쪽이 건물이고 어느 쪽이 해의 반대편으로 뻗은 그늘인지
+  // 한눈에 구분되게 한다.
   function renderShadeOverlay() {
     clearShadeOverlay();
     if (!shadeOverlayOn || !SUN_STATE || !SUN_STATE.isDaytime) return;
-    const polys = nearbyBuildingsForShade().map((b) => buildShadowPolygon(b, SUN_STATE.azimuth, SUN_STATE.altitude));
+    const buildings = nearbyBuildingsForShade();
+    const items = buildings.map((b) => ({
+      shadow: buildShadowPolygon(b, SUN_STATE.azimuth, SUN_STATE.altitude),
+      footprint: b.footprint,
+    }));
     if (usingTmap && tmapMap) {
-      polys.forEach((poly) => {
-        const p = new Tmapv3.Polygon({
-          map: tmapMap, paths: poly.map(([lat, lng]) => new Tmapv3.LatLng(lat, lng)),
-          strokeOpacity: 0, fillColor: '#1a1c22', fillOpacity: 0.4,
-        });
-        shadeOverlays.push(p);
+      items.forEach(({ shadow, footprint }) => {
+        shadeOverlays.push(new Tmapv3.Polygon({
+          map: tmapMap, paths: shadow.map(([lat, lng]) => new Tmapv3.LatLng(lat, lng)),
+          strokeOpacity: 0, fillColor: '#3a5fb0', fillOpacity: 0.35,
+        }));
+        shadeOverlays.push(new Tmapv3.Polygon({
+          map: tmapMap, paths: footprint.map(([lat, lng]) => new Tmapv3.LatLng(lat, lng)),
+          strokeOpacity: 0, fillColor: '#15171c', fillOpacity: 0.85,
+        }));
       });
     } else if (usingKakao && kakaoMap) {
-      polys.forEach((poly) => {
-        const p = new kakao.maps.Polygon({
-          map: kakaoMap, path: poly.map(([lat, lng]) => new kakao.maps.LatLng(lat, lng)),
-          strokeOpacity: 0, fillColor: '#1a1c22', fillOpacity: 0.4,
-        });
-        shadeOverlays.push(p);
+      items.forEach(({ shadow, footprint }) => {
+        shadeOverlays.push(new kakao.maps.Polygon({
+          map: kakaoMap, path: shadow.map(([lat, lng]) => new kakao.maps.LatLng(lat, lng)),
+          strokeOpacity: 0, fillColor: '#3a5fb0', fillOpacity: 0.35,
+        }));
+        shadeOverlays.push(new kakao.maps.Polygon({
+          map: kakaoMap, path: footprint.map(([lat, lng]) => new kakao.maps.LatLng(lat, lng)),
+          strokeOpacity: 0, fillColor: '#15171c', fillOpacity: 0.85,
+        }));
       });
     } else if (leafletMap) {
-      polys.forEach((poly) => {
-        const p = L.polygon(poly, { color: 'transparent', weight: 0, fill: true, fillColor: '#1a1c22', fillOpacity: 0.4 }).addTo(leafletMap);
-        shadeOverlays.push(p);
+      items.forEach(({ shadow, footprint }) => {
+        shadeOverlays.push(L.polygon(shadow, { color: 'transparent', weight: 0, fill: true, fillColor: '#3a5fb0', fillOpacity: 0.35 }).addTo(leafletMap));
+        shadeOverlays.push(L.polygon(footprint, { color: 'transparent', weight: 0, fill: true, fillColor: '#15171c', fillOpacity: 0.85 }).addTo(leafletMap));
       });
     }
   }
 
   // ==================== 지도 (Leaflet 기본, 우선순위: Tmap > 카카오맵 > Leaflet) ====================
-  const ROUTE_COLORS = { fastest: '#999999', balanced: '#0099ff', optimal: '#6a4cf5' };
+  // 빠른 길이 옅은 회색 40% 투명도라 지도 배경에 거의 안 보인다는 지적을 받아서, 색을
+  // 더 진하게(#999999 -> #5a6270) 하고 비추천 경로 투명도도 0.4 -> 0.75로 올렸다.
+  const ROUTE_COLORS = { fastest: '#5a6270', balanced: '#0099ff', optimal: '#6a4cf5' };
   let leafletMap = null, routeLayerGroup = null, leafletBaseLayer = null, satelliteLayer = null;
   let kakaoMap = null, kakaoOverlays = [];
   let tmapMap = null, tmapOverlays = [];
@@ -1737,8 +1804,8 @@
           }
           const path = nodePathToLatLng(r.nodePath).map(([lat, lng]) => new Tmapv3.LatLng(lat, lng));
           const line = new Tmapv3.Polyline({
-            path, strokeColor: ROUTE_COLORS[key], strokeWeight: isRec ? 6 : 3,
-            strokeOpacity: isRec ? 0.95 : 0.4, map: tmapMap,
+            path, strokeColor: ROUTE_COLORS[key], strokeWeight: isRec ? 6 : 4,
+            strokeOpacity: isRec ? 0.95 : 0.75, map: tmapMap,
           });
           tmapOverlays.push(line);
         });
@@ -1771,7 +1838,7 @@
         const r = routes[key];
         const isRec = key === recKey;
         const path = nodePathToLatLng(r.nodePath).map(([lat, lng]) => new kakao.maps.LatLng(lat, lng));
-        const line = new kakao.maps.Polyline({ map: kakaoMap, path, strokeWeight: isRec ? 5 : 3, strokeColor: ROUTE_COLORS[key], strokeOpacity: isRec ? 0.95 : 0.4, strokeStyle: isRec ? 'solid' : 'shortdash' });
+        const line = new kakao.maps.Polyline({ map: kakaoMap, path, strokeWeight: isRec ? 5 : 4, strokeColor: ROUTE_COLORS[key], strokeOpacity: isRec ? 0.95 : 0.75, strokeStyle: isRec ? 'solid' : 'shortdash' });
         kakaoOverlays.push(line);
       });
       const bounds = new kakao.maps.LatLngBounds();
@@ -1791,7 +1858,7 @@
         return;
       }
       L.polyline(nodePathToLatLng(r.nodePath), {
-        color: ROUTE_COLORS[key], weight: isRec ? 5 : 3, opacity: isRec ? 0.95 : 0.4, dashArray: isRec ? null : '2,8', lineCap: 'round',
+        color: ROUTE_COLORS[key], weight: isRec ? 5 : 4, opacity: isRec ? 0.95 : 0.75, dashArray: isRec ? null : '2,8', lineCap: 'round',
       }).addTo(routeLayerGroup);
     });
     const allLatLng = nodePathToLatLng(routes.fastest.nodePath);
@@ -2006,6 +2073,64 @@
   function toggleSheet() {
     document.getElementById('bottomSheet').classList.toggle('collapsed');
   }
+
+  // ==================== V-World 실사 3D (있으면) ====================
+  // V-World의 WS3D 뷰어는 발급키를 도메인 단위로 인증해서, file://로 그냥 파일을 여는
+  // 방식으로는 등록할 도메인이 없어 항상 막힌다(직접 확인: vworldIsValid=false, "등록하신
+  // API Key와 URI가 일치하지 않습니다"). scripts/serve.js로 고정 주소(localhost:5500)를
+  // 만들고 그 주소를 V-World 사이트에 등록해야 아래 로직이 실제로 뜬다. 등록 전이거나
+  // file://로 열었을 때는 실패해도 조용히 기존 SVG 모식도로 남는다(카카오→Tmap→Leaflet
+  // 폴백과 같은 "시도해보고 안 되면 원래 걸로" 철학).
+  let vworldState = 'idle'; // idle | waiting | ready | failed
+  function tryLoadVWorld3D() {
+    if (vworldState !== 'idle') return;
+    if (!CONFIG.VWORLD_API_KEY || !location.protocol.startsWith('http') || window.__vworldScriptFailed) {
+      vworldState = 'failed';
+      return;
+    }
+    vworldState = 'waiting';
+    // webglMapInit.js.do 태그 자체는 로드돼도, 그 안에서 document.write로 끼워 넣는
+    // WSViewerStartup.js 등 하위 스크립트들은 비동기라 window.vw가 바로 있지 않다.
+    // 그래서 콜백 대신 짧은 간격으로 폴링해서 준비될 때까지 기다린다.
+    const startedAt = Date.now();
+    const poll = setInterval(() => {
+      if (typeof vw !== 'undefined' && typeof vw.Map === 'function') {
+        clearInterval(poll);
+        initVWorldMap();
+        return;
+      }
+      if (Date.now() - startedAt > 8000) {
+        clearInterval(poll);
+        vworldState = 'failed';
+        console.warn('V-World 3D 타임아웃 — 도메인 미등록이거나 인증 대기 중일 수 있음. 모식도로 유지합니다.');
+      }
+    }, 300);
+  }
+  function initVWorldMap() {
+    try {
+      vw.ws3dInitCallBack = function () {
+        vworldState = 'ready';
+        document.getElementById('vworld3dMap').style.display = 'block';
+        document.getElementById('sunDiagram').style.display = 'none';
+        console.log('V-World 실사 3D 로드 성공');
+      };
+      const map = new vw.Map();
+      map.setOption({
+        mapId: 'vworld3dMap',
+        initPosition: new vw.CameraPosition(new vw.CoordZ(CENTER_LNG, CENTER_LAT, 900), new vw.Direction(0, -55, 0)),
+        logo: false, navigation: true,
+      });
+      map.start();
+      // ws3dInitCallBack이 (도메인 인증 실패 등으로) 끝내 안 오는 경우 대비
+      setTimeout(() => {
+        if (vworldState === 'waiting') { vworldState = 'failed'; console.warn('V-World 3D 초기화 콜백 타임아웃 — 모식도로 유지합니다.'); }
+      }, 6000);
+    } catch (e) {
+      vworldState = 'failed';
+      console.warn('V-World 3D 초기화 실패:', e.message);
+    }
+  }
+
   function switchTab(tab) {
     currentTab = tab;
     const showMapPanel = tab === '2d' || tab === 'sat'; // 위성은 3D처럼 별도 패널이 아니라 2D 지도의 타일만 바꾼 것
@@ -2019,7 +2144,8 @@
     document.getElementById('diagramCaption').style.display = tab === '3d' ? '' : 'none';
     applyMapType(tab === 'sat' ? 'SATELLITE' : 'ROAD');
     if (showMapPanel && leafletMap) setTimeout(() => leafletMap.invalidateSize(), 50);
-    if (tab === '3d' && window.__lastRoutes) renderSunDiagram(window.__lastRoutes);
+    if (tab === '3d' && vworldState !== 'ready' && window.__lastRoutes) renderSunDiagram(window.__lastRoutes);
+    if (tab === '3d') tryLoadVWorld3D();
   }
   // Tmap은 setMapType("SATELLITE"/"ROAD")로 확인됨(SDK 번들 직접 확인). 카카오는
   // MapTypeId.HYBRID/ROADMAP, Leaflet은 타일 레이어 자체를 바꿔치기한다.
