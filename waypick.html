@@ -7,7 +7,7 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon.svg">
 <link rel="manifest" href="waypick.manifest.json">
-<meta name="theme-color" content="#090909">
+<meta name="theme-color" content="#23262e">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -25,12 +25,12 @@
     --ink: #ffffff;
     --ink-muted: #999999;
     --ink-faint: #666666;
-    --canvas: #15171c;
-    --surface-1: #1d2026;
-    --surface-2: #262a32;
-    --surface-3: #30343d;
-    --hairline: #383c46;
-    --hairline-soft: #262a32;
+    --canvas: #23262e;
+    --surface-1: #2d313b;
+    --surface-2: #383c48;
+    --surface-3: #444955;
+    --hairline: #525866;
+    --hairline-soft: #383c48;
     --gradient-magenta: #d44df0;
     --gradient-violet: #6a4cf5;
     --gradient-orange: #ff7a3d;
@@ -51,7 +51,7 @@
 
   html, body {
     margin: 0;
-    background: #0d0f13;
+    background: #1a1c22;
     overflow-x: hidden;
   }
 
@@ -122,14 +122,21 @@
   /* 하단 시트: 검색 조건/경로 목록 — 지도의 아래쪽 위에 카드로 얹힌다 */
   .bottom-sheet {
     position: absolute; left: 0; right: 0; bottom: 0; top: 46%; z-index: 3;
-    background: rgba(29,32,38,0.92); backdrop-filter: blur(16px);
+    background: rgba(35,38,46,0.94); backdrop-filter: blur(16px);
     border-radius: 22px 22px 0 0;
     box-shadow: 0 -12px 30px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.05);
     padding: 8px 18px 24px;
     overflow-y: auto; scrollbar-width: none;
+    transition: top .28s cubic-bezier(.2,.8,.3,1);
   }
   .bottom-sheet::-webkit-scrollbar { display: none; }
-  .sheet-handle { width: 36px; height: 4px; border-radius: 2px; background: var(--hairline); margin: 8px auto 14px; }
+  /* 접으면 손잡이만 보이는 얇은 띠로 줄어들어 지도 전체가 드러난다 */
+  .bottom-sheet.collapsed { top: calc(100% - 34px); overflow: hidden; }
+  .sheet-handle {
+    width: 36px; height: 4px; border-radius: 2px; background: var(--hairline);
+    margin: 8px auto 14px; cursor: pointer;
+  }
+  .sheet-handle-row { display: flex; justify-content: center; align-items: center; cursor: pointer; }
   /* 지도 영역(상단 46%) 안에서 하단 시트 경계 바로 위에 걸치는 것들 */
   .map-floor-anchor { position: absolute; left: 0; right: 0; z-index: 2; bottom: calc(54% + 10px); }
 
@@ -306,7 +313,8 @@
   /* ---------- Real map (Leaflet) ---------- */
   #leafletMap { width: 100%; height: 100%; background: var(--surface-1); }
   .map-legend {
-    position: absolute; right: 18px; bottom: calc(54% + 10px); z-index: 4;
+    /* 확대/축소 버튼(하단 우측)과 안 겹치게 그 위쪽에 쌓는다 */
+    position: absolute; right: 18px; bottom: calc(54% + 90px); z-index: 4;
     display: flex; flex-direction: column; align-items: flex-end; gap: 5px; pointer-events: none;
   }
   .map-legend span {
@@ -342,6 +350,8 @@
     border-color: var(--hairline) !important;
   }
   .leaflet-control-zoom { border: none !important; box-shadow: none !important; }
+  /* 하단 시트가 지도 아래쪽을 덮으므로 확대/축소 버튼을 시트 경계 위로 올린다 */
+  .leaflet-bottom.leaflet-right { bottom: calc(54% + 10px) !important; }
 
   /* ---------- 월/시각 선택 ---------- */
   .time-row {
@@ -479,6 +489,7 @@
         <div class="map-box">
           <div id="leafletMap"></div>
           <div id="kakaoMap" style="width:100%; height:100%; display:none;"></div>
+          <div id="tmapMap" style="width:100%; height:100%; display:none;"></div>
         </div>
       </div>
       <div class="tab-panel" id="tab3dPanel">
@@ -525,8 +536,10 @@
       </div>
     </div>
 
-    <div class="bottom-sheet">
-      <div class="sheet-handle"></div>
+    <div class="bottom-sheet" id="bottomSheet">
+      <div class="sheet-handle-row" onclick="toggleSheet()" title="눌러서 지도 전체 보기/메뉴 펼치기">
+        <div class="sheet-handle"></div>
+      </div>
 
       <div class="search-box">
         <input id="searchInput" type="text" placeholder="예: 햇빛 피하는 길 알려줘" onkeydown="if(event.key==='Enter') runSearch()">
@@ -566,11 +579,32 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!--
+  Tmap Vector SDK는 내부적으로 document.write로 하위 스크립트를 끼워 넣는데, 이건 파서가
+  직접 만난(정적) <script> 태그에서만 되고 JS로 나중에 동적 생성해서 넣은 <script>에서는
+  브라우저가 막는다(콘솔에 "Failed to execute 'write' on 'Document'"). 그래서 키가 있을 때만
+  JS로 태그를 만들지 않고, 여기 정적으로 박아둔다. 키가 잘못되거나 만료되면 Tmapv3가
+  아예 안 만들어지므로 아래 메인 스크립트에서 typeof Tmapv3로 감지해서 카카오맵/Leaflet으로
+  자동 대체한다.
+-->
+<script src="https://apis.openapi.sk.com/tmap/vectorjs?version=1&appKey=29KXFOvgtQ8P1pyMPn8yybASpgcnje8NNA7ZgZ00" onerror="window.__tmapScriptFailed=true"></script>
+<!--
+  데이터는 fetch()가 아니라 <script src>로 불러온다. file://로 더블클릭해서 열면
+  fetch/XHR는 "origin null" CORS 에러로 막히지만, 로컬 <script src>는 막히지 않는다 —
+  서버 없이 그냥 파일을 열어도 되게 하기 위한 선택. data/*.js는
+  scripts/embed_data.js가 data/*.json에서 생성한다 (원본은 json, js는 산출물).
+-->
+<script src="data/yeoksam_graph.js"></script>
+<script src="data/yeoksam_buildings.js"></script>
+<script src="data/yeoksam_presets.js"></script>
+<script src="data/yeoksam_dong_boundary.js"></script>
 <script>
   // ==================== 설정 ====================
   // developers.kakao.com 에서 발급받은 JavaScript 키를 넣으면 카카오맵으로 전환됩니다.
   // 비어있으면 키 없이 되는 Leaflet+OSM/Carto 지도를 그대로 사용합니다.
   const CONFIG = {
+    // openapi.sk.com에서 발급받은 실제 작동 확인된 키. Tmap을 최우선으로 쓴다.
+    TMAP_APP_KEY: '29KXFOvgtQ8P1pyMPn8yybASpgcnje8NNA7ZgZ00',
     // 카카오디벨로퍼스에 localhost:5500 / 실제 배포 도메인을 "Web 플랫폼"으로 등록한 뒤
     // 여기 다시 넣어주세요 (도메인 미등록 상태로 넣으면 "domain mismatched" 에러가 나서
     // 자동으로 Leaflet 지도로 대체됩니다). 발급받은 키: 268479ed7c37ff0bb7739e36e854586b
@@ -1042,11 +1076,15 @@
   }
   function setSpeed(s) { speedLevel = s; renderBusPanel(); }
 
-  // ==================== 지도 (Leaflet 기본, 키 있으면 카카오맵) ====================
+  // ==================== 지도 (Leaflet 기본, 우선순위: Tmap > 카카오맵 > Leaflet) ====================
   const ROUTE_COLORS = { fastest: '#999999', balanced: '#0099ff', optimal: '#6a4cf5' };
   let leafletMap = null, routeLayerGroup = null;
   let kakaoMap = null, kakaoOverlays = [];
-  let usingKakao = !!CONFIG.KAKAO_JS_KEY;
+  let tmapMap = null, tmapOverlays = [];
+  // Tmap SDK는 <head>의 정적 <script>가 이미 로드를 시도한 뒤이므로, 실제로 성공했는지는
+  // Tmapv3 전역이 만들어졌는지로 판단한다 (키/구독 문제로 실패하면 정의 자체가 안 됨).
+  let usingTmap = !!CONFIG.TMAP_APP_KEY && typeof Tmapv3 !== 'undefined' && !window.__tmapScriptFailed;
+  let usingKakao = !usingTmap && !!CONFIG.KAKAO_JS_KEY;
 
   // ==================== 지도 클릭으로 출발/도착 지정 ====================
   let customCoords = { origin: null, dest: null };
@@ -1075,15 +1113,18 @@
   }
 
   function initMap() {
+    if (usingTmap) { loadTmapMap(); return; }
     if (usingKakao) { loadKakaoMap(); return; }
     initLeaflet();
   }
   function initLeaflet() {
     document.getElementById('kakaoMap').style.display = 'none';
+    document.getElementById('tmapMap').style.display = 'none';
     document.getElementById('leafletMap').style.display = 'block';
-    // 지도 위에 검색창/탭이 플로팅으로 떠 있어서 상단 코너가 가려지므로 기본 확대/축소 버튼은
-    // 끄고(핀치/휠 줌은 그대로 동작) 저작권 표기만 하단 왼쪽(플로팅 탭 옆)으로 옮긴다.
+    // 지도 위에 검색창/탭이 플로팅으로 떠 있어서 확대/축소 버튼은 하단 시트 경계 바로
+    // 위(오른쪽)로, 저작권 표기는 하단 왼쪽(플로팅 탭 옆)으로 옮긴다.
     leafletMap = L.map('leafletMap', { zoomControl: false, attributionControl: true }).setView([CENTER_LAT, CENTER_LNG], 16);
+    L.control.zoom({ position: 'bottomright' }).addTo(leafletMap);
     leafletMap.attributionControl.setPosition('bottomleft');
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       subdomains: 'abcd', maxZoom: 19, attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
@@ -1101,14 +1142,53 @@
     setTimeout(() => leafletMap.invalidateSize(), 200);
     if (window.__lastRoutes) renderMapRoutes(window.__lastRoutes);
   }
-  // 카카오맵이 (도메인 미등록 등으로) 로드에 실패하면 화면이 비지 않도록 Leaflet로 자동 전환한다.
-  let kakaoFellBack = false;
+  // Tmap/카카오맵이 로드에 실패하면 화면이 비지 않도록 Leaflet로 자동 전환한다.
+  let mapFellBack = false;
   function fallbackToLeaflet(reason) {
-    if (kakaoFellBack) return;
-    kakaoFellBack = true;
-    usingKakao = false;
-    console.warn('카카오맵 로드 실패, Leaflet 지도로 대체합니다:', reason);
+    if (mapFellBack) return;
+    mapFellBack = true;
+    usingTmap = false; usingKakao = false;
+    console.warn('외부 지도 로드 실패, Leaflet 지도로 대체합니다:', reason);
     initLeaflet();
+  }
+  function loadTmapMap() {
+    document.getElementById('leafletMap').style.display = 'none';
+    document.getElementById('kakaoMap').style.display = 'none';
+    document.getElementById('tmapMap').style.display = 'block';
+    try {
+      tmapMap = new Tmapv3.Map('tmapMap', {
+        center: new Tmapv3.LatLng(CENTER_LAT, CENTER_LNG),
+        width: '100%', height: '100%', zoom: 16,
+      });
+      if (DONG_BOUNDARY) {
+        for (const dong of DONG_BOUNDARY) {
+          for (const ring of dong.rings) {
+            new Tmapv3.Polygon({
+              map: tmapMap,
+              paths: ring.map(([lat, lng]) => new Tmapv3.LatLng(lat, lng)),
+              strokeColor: '#8a8f9a', strokeWeight: 1, strokeOpacity: 0.45, fillOpacity: 0,
+            });
+          }
+        }
+      }
+      // Tmap Vector JS 클릭 이벤트 payload 형식이 문서로 확인이 안 돼서, 대신 지도 컨테이너의
+      // 원시 DOM 클릭 좌표를 받아 확인된 API인 screenToReal()로 좌표 변환한다 (더 안전한 방법).
+      const mapDiv = document.getElementById('tmapMap');
+      mapDiv.addEventListener('click', (domEvt) => {
+        if (!pickingField) return;
+        const rect = mapDiv.getBoundingClientRect();
+        const px = domEvt.clientX - rect.left, py = domEvt.clientY - rect.top;
+        try {
+          const real = tmapMap.screenToReal(px, py);
+          const lat = typeof real.lat === 'function' ? real.lat() : real._lat;
+          const lng = typeof real.lng === 'function' ? real.lng() : (typeof real.lon === 'function' ? real.lon() : real._lng);
+          if (typeof lat === 'number' && typeof lng === 'number') onMapPointPicked(lat, lng);
+        } catch (e) { console.warn('Tmap 좌표 변환 실패:', e.message); }
+      });
+      if (window.__lastRoutes) renderMapRoutes(window.__lastRoutes);
+    } catch (e) {
+      fallbackToLeaflet(e.message);
+    }
   }
   function loadKakaoMap() {
     document.getElementById('leafletMap').style.display = 'none';
@@ -1154,6 +1234,38 @@
   function renderMapRoutes(routes) {
     window.__lastRoutes = routes;
     const recKey = activeConditions.size ? 'optimal' : 'fastest';
+    if (usingTmap) {
+      if (!tmapMap) return;
+      try {
+        tmapOverlays.forEach((o) => o.setMap && o.setMap(null));
+        tmapOverlays = [];
+        ['optimal', 'balanced', 'fastest'].forEach((key) => {
+          const r = routes[key];
+          const isRec = key === recKey;
+          const path = nodePathToLatLng(r.nodePath).map(([lat, lng]) => new Tmapv3.LatLng(lat, lng));
+          const line = new Tmapv3.Polyline({
+            path, strokeColor: ROUTE_COLORS[key], strokeWeight: isRec ? 6 : 3,
+            strokeOpacity: isRec ? 0.95 : 0.4, map: tmapMap,
+          });
+          tmapOverlays.push(line);
+        });
+        const allLatLng = nodePathToLatLng(routes.fastest.nodePath);
+        const oM = new Tmapv3.Marker({ position: new Tmapv3.LatLng(...allLatLng[0]), map: tmapMap });
+        const dM = new Tmapv3.Marker({ position: new Tmapv3.LatLng(...allLatLng[allLatLng.length - 1]), map: tmapMap });
+        tmapOverlays.push(oM, dM);
+        let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+        for (const [lat, lng] of allLatLng) { minLat = Math.min(minLat, lat); maxLat = Math.max(maxLat, lat); minLng = Math.min(minLng, lng); maxLng = Math.max(maxLng, lng); }
+        tmapMap.fitBounds(new Tmapv3.LatLngBounds(new Tmapv3.LatLng(minLat, minLng), new Tmapv3.LatLng(maxLat, maxLng)));
+      } catch (e) {
+        console.warn('Tmap 경로 표시 실패:', e.message);
+      }
+      document.getElementById('mapLegend').innerHTML = `
+        <span><i class="sw" style="background:${ROUTE_COLORS.fastest}"></i>빠른</span>
+        <span><i class="sw" style="background:${ROUTE_COLORS.balanced}"></i>균형</span>
+        <span><i class="sw" style="background:${ROUTE_COLORS.optimal}"></i>최적</span>
+      `;
+      return;
+    }
     if (usingKakao) {
       if (!kakaoMap) return;
       kakaoOverlays.forEach((o) => o.setMap(null));
@@ -1301,6 +1413,9 @@
     render();
   }
   function onTimeChange() { computeExposures(); render(); }
+  function toggleSheet() {
+    document.getElementById('bottomSheet').classList.toggle('collapsed');
+  }
   function switchTab(tab) {
     currentTab = tab;
     document.getElementById('tab2dBtn').classList.toggle('active', tab === '2d');
@@ -1429,13 +1544,11 @@
   }
 
   async function init() {
-    const [graph, buildings, presets, dongBoundary] = await Promise.all([
-      fetch('./data/yeoksam_graph.json').then((r) => r.json()),
-      fetch('./data/yeoksam_buildings.json').then((r) => r.json()),
-      fetch('./data/yeoksam_presets.json').then((r) => r.json()),
-      fetch('./data/yeoksam_dong_boundary.json').then((r) => r.json()).catch(() => []),
-    ]);
-    GRAPH = graph; BUILDINGS = buildings; PRESETS = presets; DONG_BOUNDARY = dongBoundary;
+    // <script src="data/*.js">로 이미 로드된 전역 변수를 그대로 쓴다 (file://에서도 동작).
+    GRAPH = window.WAYPICK_GRAPH;
+    BUILDINGS = window.WAYPICK_BUILDINGS;
+    PRESETS = window.WAYPICK_PRESETS;
+    DONG_BOUNDARY = window.WAYPICK_DONG_BOUNDARY || [];
     ADJ = buildAdjacency(GRAPH);
     BUILD_GRID = buildGrid(BUILDINGS);
     computeSlopeExposures();
