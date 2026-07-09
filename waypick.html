@@ -19,18 +19,18 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   :root {
-    --primary: #ffffff;
-    --on-primary: #000000;
+    --primary: #1a1c22;
+    --on-primary: #ffffff;
     --accent-blue: #0099ff;
-    --ink: #ffffff;
-    --ink-muted: #999999;
-    --ink-faint: #666666;
-    --canvas: #23262e;
-    --surface-1: #2d313b;
-    --surface-2: #383c48;
-    --surface-3: #444955;
-    --hairline: #525866;
-    --hairline-soft: #383c48;
+    --ink: #1a1c22;
+    --ink-muted: #6b7280;
+    --ink-faint: #9aa0ab;
+    --canvas: #f2f3f5;
+    --surface-1: #ffffff;
+    --surface-2: #eef0f3;
+    --surface-3: #e3e6ea;
+    --hairline: #e2e5ea;
+    --hairline-soft: #edeff2;
     --gradient-magenta: #d44df0;
     --gradient-violet: #6a4cf5;
     --gradient-orange: #ff7a3d;
@@ -44,14 +44,14 @@
     --sp-xxs: 4px; --sp-xs: 8px; --sp-sm: 12px; --sp-md: 15px;
     --sp-lg: 20px; --sp-xl: 30px;
 
-    color-scheme: dark;
+    color-scheme: light;
   }
 
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
   html, body {
     margin: 0;
-    background: #1a1c22;
+    background: #e4e6ea;
     overflow-x: hidden;
   }
 
@@ -122,9 +122,9 @@
   /* 하단 시트: 검색 조건/경로 목록 — 지도의 아래쪽 위에 카드로 얹힌다 */
   .bottom-sheet {
     position: absolute; left: 0; right: 0; bottom: 0; top: 46%; z-index: 3;
-    background: rgba(35,38,46,0.94); backdrop-filter: blur(16px);
+    background: rgba(255,255,255,0.96); backdrop-filter: blur(16px);
     border-radius: 22px 22px 0 0;
-    box-shadow: 0 -12px 30px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.05);
+    box-shadow: 0 -12px 30px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05);
     padding: 8px 18px 24px;
     overflow-y: auto; scrollbar-width: none;
     transition: top .28s cubic-bezier(.2,.8,.3,1);
@@ -295,8 +295,8 @@
   /* ---------- 지도 위 플로팅 UI (검색은 상단, 탭/범례/힌트는 하단 시트 경계 바로 위) ---------- */
   .floating-tabs {
     position: absolute; left: 18px; bottom: calc(54% + 10px); z-index: 4;
-    display: flex; gap: 4px; background: rgba(10,11,14,0.8); border-radius: var(--r-pill);
-    padding: 3px; backdrop-filter: blur(4px);
+    display: flex; gap: 4px; background: rgba(255,255,255,0.92); border-radius: var(--r-pill);
+    padding: 3px; backdrop-filter: blur(4px); box-shadow: 0 4px 14px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05);
   }
   .ftab {
     cursor: pointer; font-size: 11px; font-weight: 700; color: var(--ink-muted);
@@ -304,11 +304,11 @@
   }
   .ftab.active { background: var(--ink); color: var(--on-primary); }
   .floating-search .route-card {
-    background: rgba(25,27,33,0.9); backdrop-filter: blur(8px);
-    box-shadow: 0 10px 30px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.94); backdrop-filter: blur(8px);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.06);
     margin-bottom: 0;
   }
-  .floating-search .pick-hint { color: rgba(255,255,255,0.55); text-shadow: 0 1px 3px rgba(0,0,0,0.6); margin: 6px 2px 0; }
+  .floating-search .pick-hint { color: var(--ink-muted); text-shadow: 0 1px 3px rgba(255,255,255,0.6); margin: 6px 2px 0; }
 
   /* ---------- Real map (Leaflet) ---------- */
   #leafletMap { width: 100%; height: 100%; background: var(--surface-1); }
@@ -319,8 +319,8 @@
   }
   .map-legend span {
     font-size: 9.5px; font-weight: 700; padding: 3px 7px; border-radius: var(--r-pill);
-    background: rgba(10,11,14,0.8); color: var(--ink-muted); display: flex; align-items: center; gap: 5px;
-    backdrop-filter: blur(2px);
+    background: rgba(255,255,255,0.92); color: var(--ink-muted); display: flex; align-items: center; gap: 5px;
+    backdrop-filter: blur(2px); box-shadow: 0 2px 8px rgba(0,0,0,0.1);
   }
   .map-legend .sw { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
   .map-legend .sw.boundary {
@@ -336,12 +336,12 @@
   .map-hint.show { display: flex; }
   @keyframes pulseHint { 0%,100% { opacity: 1; } 50% { opacity: 0.65; } }
   .route-via-icon {
-    background: rgba(9,9,9,0.85); border-radius: 50%; width: 26px; height: 26px;
+    background: rgba(255,255,255,0.9); border-radius: 50%; width: 26px; height: 26px;
     display: flex; align-items: center; justify-content: center; font-size: 13px;
     border: 1.5px solid var(--accent-blue);
   }
   .leaflet-control-attribution {
-    background: rgba(9,9,9,0.7) !important; color: var(--ink-faint) !important;
+    background: rgba(255,255,255,0.75) !important; color: var(--ink-faint) !important;
     font-size: 8.5px !important; padding: 1px 5px !important;
   }
   .leaflet-control-attribution a { color: var(--ink-muted) !important; }
@@ -394,8 +394,8 @@
   .diagram-caption {
     position: absolute; right: 18px; left: 90px; bottom: calc(54% + 10px); z-index: 4;
     font-size: 9.5px; font-weight: 700; color: var(--ink-muted); text-align: right;
-    background: rgba(10,11,14,0.8); padding: 5px 9px; border-radius: var(--r-md);
-    pointer-events: none;
+    background: rgba(255,255,255,0.9); padding: 5px 9px; border-radius: var(--r-md);
+    pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
   }
 
   /* ---------- Section heading ---------- */
@@ -469,6 +469,35 @@
     .phone-frame { width: 100%; height: 100vh; max-height: 100vh; border-radius: 0; border: none; }
     .phone-notch { display: none; }
     .app-content { padding-top: 20px; }
+  }
+
+  /* ---------- 넓은 화면(웹/데스크톱): 폰 목업 대신 사이드바 + 큰 지도 ---------- */
+  @media (min-width: 860px) {
+    body { padding: 0; align-items: stretch; }
+    .phone-frame {
+      width: 100vw; height: 100vh; max-width: 100vw; max-height: 100vh;
+      border-radius: 0; border: none; box-shadow: none;
+    }
+    .phone-notch { display: none; }
+    .app-content { display: grid; grid-template-columns: 420px 1fr; grid-template-rows: auto 1fr; }
+    .map-backdrop { position: relative; inset: auto; grid-column: 2; grid-row: 1 / 3; }
+    .overlay-top {
+      position: relative; grid-column: 1; grid-row: 1; inset: auto;
+      padding: 28px 24px 12px; pointer-events: auto; background: var(--canvas);
+    }
+    .bottom-sheet {
+      position: relative; grid-column: 1; grid-row: 2; inset: auto; top: auto;
+      border-radius: 0; box-shadow: none; border-top: 1px solid var(--hairline);
+      background: var(--canvas); backdrop-filter: none;
+    }
+    .bottom-sheet.collapsed { top: auto; } /* 데스크톱에서는 접기 동작 비활성화 — 지도가 이미 항상 다 보임 */
+    .sheet-handle-row { display: none; }
+    .floating-tabs { left: 24px; bottom: 20px; }
+    .map-legend { right: 20px; bottom: 90px; }
+    .map-hint { bottom: 60px; }
+    .diagram-caption { right: 20px; left: auto; bottom: 20px; }
+    .leaflet-bottom.leaflet-right { bottom: 20px !important; }
+    .floating-search .route-card { box-shadow: none; border: 1px solid var(--hairline); }
   }
 </style>
 </head>
@@ -1008,8 +1037,7 @@
     if (!fastestRun) return null;
     const fastest = routeInfo(fastestRun.edgePath, fastestRun.nodePath);
 
-    const noCondition = !activeConditions.has('sun') && !activeConditions.has('rain');
-    if (noCondition) return { fastest, balanced: fastest, optimal: fastest };
+    if (activeConditions.size === 0) return { fastest, balanced: fastest, optimal: fastest };
 
     const balancedRun = dijkstra(startId, endId, (idx) => GRAPH.edges[idx].distanceM * (1 + combinedExposureForIdx(idx) * 1.4));
     const balanced = balancedRun ? routeInfo(balancedRun.edgePath, balancedRun.nodePath) : fastest;
@@ -1231,9 +1259,27 @@
   }
   function nodePathToLatLng(nodePath) { return nodePath.map((id) => [GRAPH.nodes[id].lat, GRAPH.nodes[id].lng]); }
 
+  // 햇빛 피하기가 켜져 있으면 추천 경로는 단색 대신 구간별 노출도 색으로 표시한다
+  // (3D 모식도와 같은 발상을 2D 지도에도 적용 — "지도 위에 일조량 표시").
+  function sunExposureColor(edgeIdx) {
+    if (!SUN_STATE.isDaytime) return '#7a8290';
+    const exp = EDGE_META[edgeIdx] ? EDGE_META[edgeIdx].sunExposure : 0;
+    return exp > 0.66 ? '#ff5a1f' : exp > 0.33 ? '#ffb020' : '#0099ff';
+  }
+  function routeSegments(route, useSunColor) {
+    const segs = [];
+    for (let i = 0; i < route.nodePath.length - 1; i++) {
+      const a = GRAPH.nodes[route.nodePath[i]], b = GRAPH.nodes[route.nodePath[i + 1]];
+      const color = useSunColor ? sunExposureColor(route.edgePath[i]) : null;
+      segs.push({ from: [a.lat, a.lng], to: [b.lat, b.lng], color });
+    }
+    return segs;
+  }
+
   function renderMapRoutes(routes) {
     window.__lastRoutes = routes;
     const recKey = activeConditions.size ? 'optimal' : 'fastest';
+    const colorBySun = activeConditions.has('sun');
     if (usingTmap) {
       if (!tmapMap) return;
       try {
@@ -1242,6 +1288,16 @@
         ['optimal', 'balanced', 'fastest'].forEach((key) => {
           const r = routes[key];
           const isRec = key === recKey;
+          if (isRec && colorBySun) {
+            for (const seg of routeSegments(r, true)) {
+              const line = new Tmapv3.Polyline({
+                path: [new Tmapv3.LatLng(...seg.from), new Tmapv3.LatLng(...seg.to)],
+                strokeColor: seg.color, strokeWeight: 6, strokeOpacity: 0.95, map: tmapMap,
+              });
+              tmapOverlays.push(line);
+            }
+            return;
+          }
           const path = nodePathToLatLng(r.nodePath).map(([lat, lng]) => new Tmapv3.LatLng(lat, lng));
           const line = new Tmapv3.Polyline({
             path, strokeColor: ROUTE_COLORS[key], strokeWeight: isRec ? 6 : 3,
@@ -1259,7 +1315,11 @@
       } catch (e) {
         console.warn('Tmap 경로 표시 실패:', e.message);
       }
-      document.getElementById('mapLegend').innerHTML = `
+      document.getElementById('mapLegend').innerHTML = colorBySun ? `
+        <span><i class="sw" style="background:#ff5a1f"></i>햇빛 많음</span>
+        <span><i class="sw" style="background:#ffb020"></i>보통</span>
+        <span><i class="sw" style="background:#0099ff"></i>그늘</span>
+      ` : `
         <span><i class="sw" style="background:${ROUTE_COLORS.fastest}"></i>빠른</span>
         <span><i class="sw" style="background:${ROUTE_COLORS.balanced}"></i>균형</span>
         <span><i class="sw" style="background:${ROUTE_COLORS.optimal}"></i>최적</span>
@@ -1287,6 +1347,12 @@
     ['optimal', 'balanced', 'fastest'].forEach((key) => {
       const r = routes[key];
       const isRec = key === recKey;
+      if (isRec && colorBySun) {
+        for (const seg of routeSegments(r, true)) {
+          L.polyline([seg.from, seg.to], { color: seg.color, weight: 5, opacity: 0.95, lineCap: 'round' }).addTo(routeLayerGroup);
+        }
+        return;
+      }
       L.polyline(nodePathToLatLng(r.nodePath), {
         color: ROUTE_COLORS[key], weight: isRec ? 5 : 3, opacity: isRec ? 0.95 : 0.4, dashArray: isRec ? null : '2,8', lineCap: 'round',
       }).addTo(routeLayerGroup);
@@ -1296,7 +1362,12 @@
     L.marker(allLatLng[allLatLng.length - 1], { icon: dotIcon('#ff5577') }).addTo(routeLayerGroup);
     leafletMap.fitBounds(L.latLngBounds(allLatLng), { padding: [26, 26] });
 
-    document.getElementById('mapLegend').innerHTML = `
+    document.getElementById('mapLegend').innerHTML = colorBySun ? `
+      <span><i class="sw" style="background:#ff5a1f"></i>햇빛 많음</span>
+      <span><i class="sw" style="background:#ffb020"></i>보통</span>
+      <span><i class="sw" style="background:#0099ff"></i>그늘</span>
+      <span><i class="sw boundary"></i>동 경계</span>
+    ` : `
       <span><i class="sw" style="background:${ROUTE_COLORS.fastest}"></i>빠른</span>
       <span><i class="sw" style="background:${ROUTE_COLORS.balanced}"></i>균형</span>
       <span><i class="sw" style="background:${ROUTE_COLORS.optimal}"></i>최적</span>
@@ -1305,7 +1376,63 @@
   }
 
   // ==================== 태양-건물 3D 모식도 (SVG) ====================
+  // ---- 3D 모식도 드래그 이동 + 휠/핀치 확대 ----
+  // renderSunDiagram이 매번 innerHTML을 통째로 새로 그려서 SVG 엘리먼트 자체가 매번
+  // 교체되므로, viewBox 조작이 아니라 (렌더 좌표계는 항상 0..DIAGRAM_W/H로 고정해두고)
+  // 카메라 상태를 별도로 유지했다가 렌더 직후 viewBox에 적용하는 방식을 쓴다.
+  const DIAGRAM_W = 340, DIAGRAM_H = 220;
+  let diagramCamera = { x: 0, y: 0, scale: 1 };
+  let diagramInteractionReady = false;
+  function applyDiagramCamera() {
+    const svg = document.querySelector('#sunDiagram svg');
+    if (!svg) return;
+    const w = DIAGRAM_W / diagramCamera.scale, h = DIAGRAM_H / diagramCamera.scale;
+    svg.setAttribute('viewBox', `${diagramCamera.x} ${diagramCamera.y} ${w} ${h}`);
+  }
+  function clampDiagramCamera() {
+    const w = DIAGRAM_W / diagramCamera.scale, h = DIAGRAM_H / diagramCamera.scale;
+    // 콘텐츠 밖으로 너무 멀리 나가지 않게 여유(콘텐츠 크기의 절반)만 허용
+    const marginX = DIAGRAM_W * 0.5, marginY = DIAGRAM_H * 0.5;
+    diagramCamera.x = Math.max(-marginX, Math.min(DIAGRAM_W - w + marginX, diagramCamera.x));
+    diagramCamera.y = Math.max(-marginY, Math.min(DIAGRAM_H - h + marginY, diagramCamera.y));
+  }
+  function setupDiagramInteraction() {
+    if (diagramInteractionReady) return; // 렌더될 때마다 SVG는 바뀌지만 컨테이너는 그대로라 리스너는 한 번만
+    diagramInteractionReady = true;
+    const box = document.getElementById('sunDiagram');
+    let dragging = false, lastX = 0, lastY = 0;
+    const toContentDelta = (dxPx, dyPx) => {
+      const rect = box.getBoundingClientRect();
+      const pxToUnit = (DIAGRAM_W / diagramCamera.scale) / rect.width;
+      return [dxPx * pxToUnit, dyPx * pxToUnit];
+    };
+    box.addEventListener('pointerdown', (e) => {
+      dragging = true; lastX = e.clientX; lastY = e.clientY;
+      box.setPointerCapture(e.pointerId);
+    });
+    box.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const [dx, dy] = toContentDelta(e.clientX - lastX, e.clientY - lastY);
+      diagramCamera.x -= dx; diagramCamera.y -= dy;
+      lastX = e.clientX; lastY = e.clientY;
+      clampDiagramCamera();
+      applyDiagramCamera();
+    });
+    const endDrag = () => { dragging = false; };
+    box.addEventListener('pointerup', endDrag);
+    box.addEventListener('pointerleave', endDrag);
+    box.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      diagramCamera.scale = Math.max(0.6, Math.min(5, diagramCamera.scale * factor));
+      clampDiagramCamera();
+      applyDiagramCamera();
+    }, { passive: false });
+  }
+  function resetDiagramCamera() { diagramCamera = { x: 0, y: 0, scale: 1 }; }
+
   function renderSunDiagram(routes) {
+    resetDiagramCamera(); // 새 경로/시각으로 다시 그릴 때는 항상 전체가 보이는 기본 배율로
     const box = document.getElementById('sunDiagram');
     const route = routes[selectedRouteKey] || routes.fastest;
     const coords = route.nodePath.map((id) => GRAPH.nodes[id]);
@@ -1315,7 +1442,7 @@
     minLat -= padDeg; maxLat += padDeg; minLng -= padDeg; maxLng += padDeg;
     const latC = (minLat + maxLat) / 2;
     const mPerDegLat = 110540, mPerDegLng = 111320 * Math.cos(latC * Math.PI / 180);
-    const W = 340, H = 220;
+    const W = DIAGRAM_W, H = DIAGRAM_H;
     const rangeXm = (maxLng - minLng) * mPerDegLng, rangeYm = (maxLat - minLat) * mPerDegLat;
     const scale = Math.max(0.2, Math.min((W - 20) / Math.max(rangeXm, 1), (H - 20) / Math.max(rangeYm, 1)));
     const toXY = (lat, lng) => [W / 2 + (lng - (minLng + maxLng) / 2) * mPerDegLng * scale, H / 2 - (lat - latC) * mPerDegLat * scale];
@@ -1326,14 +1453,14 @@
     }).slice(0, 60);
 
     let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
-    svg += `<rect x="0" y="0" width="${W}" height="${H}" fill="#141414"/>`;
+    svg += `<rect x="0" y="0" width="${W}" height="${H}" fill="#eef0f3"/>`;
 
     // 그림자 (낮일 때만)
     if (SUN_STATE.isDaytime) {
       for (const b of nearby) {
         const poly = buildShadowPolygon(b, SUN_STATE.azimuth, SUN_STATE.altitude);
         const pts = poly.map(([lat, lng]) => toXY(lat, lng).join(',')).join(' ');
-        svg += `<polygon points="${pts}" fill="#000000" opacity="0.35"/>`;
+        svg += `<polygon points="${pts}" fill="#8a8f9a" opacity="0.3"/>`;
       }
     }
 
@@ -1342,8 +1469,8 @@
       const topPts = b.footprint.map(([lat, lng]) => toXY(lat, lng));
       const extrusionPx = Math.min(16, Math.sqrt(b.heightM) * 1.1);
       const sidePts = topPts.map(([x, y]) => [x - extrusionPx * 0.5, y - extrusionPx * 0.85]);
-      svg += `<polygon points="${sidePts.map((p) => p.join(',')).join(' ')}" fill="#2a2a2a" stroke="#333" stroke-width="0.5"/>`;
-      svg += `<polygon points="${topPts.map((p) => p.join(',')).join(' ')}" fill="#3a3a3f" stroke="#4a4a52" stroke-width="0.6"/>`;
+      svg += `<polygon points="${sidePts.map((p) => p.join(',')).join(' ')}" fill="#c3c8d1" stroke="#aab0bb" stroke-width="0.5"/>`;
+      svg += `<polygon points="${topPts.map((p) => p.join(',')).join(' ')}" fill="#dde1e7" stroke="#b7bcc6" stroke-width="0.6"/>`;
     }
 
     // 경로선 (구간별 노출도로 색 구분)
@@ -1365,12 +1492,17 @@
       const opacity = 0.5 + (SUN_STATE.altitude / 90) * 0.5;
       svg += `<circle cx="${sx}" cy="${sy}" r="${r}" fill="#ffcc55" opacity="${opacity.toFixed(2)}"/>`;
       svg += `<circle cx="${sx}" cy="${sy}" r="${r + 5}" fill="none" stroke="#ffcc55" stroke-width="1" opacity="${(opacity * 0.4).toFixed(2)}"/>`;
+      const labelAnchor = sx > W / 2 ? 'end' : 'start';
+      const labelX = sx > W / 2 ? sx - r - 6 : sx + r + 6;
+      svg += `<text x="${labelX}" y="${sy + 3}" font-size="9" font-weight="700" fill="#ffcc55" text-anchor="${labelAnchor}">☀️ 태양</text>`;
     } else {
-      svg += `<text x="${W - 26}" y="24" font-size="18">🌙</text>`;
+      svg += `<text x="${W - 46}" y="24" font-size="16">🌙 밤</text>`;
     }
 
     svg += '</svg>';
     box.innerHTML = svg;
+    applyDiagramCamera();
+    setupDiagramInteraction();
 
     const monthEl = selectedMonth(), hourEl = selectedHour();
     document.getElementById('diagramCaption').textContent = SUN_STATE.isDaytime
