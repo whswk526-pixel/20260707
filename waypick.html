@@ -461,6 +461,12 @@
     overflow: hidden;
   }
   .diagram-box svg { width: 100%; height: 100%; display: block; }
+  .vworld-loading {
+    position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 5;
+    display: none; font-size: 11px; font-weight: 600; color: #fff;
+    background: rgba(20,22,28,0.82); padding: 6px 12px; border-radius: var(--r-pill); white-space: nowrap;
+  }
+  .vworld-loading.show { display: block; }
   .diagram-caption {
     position: absolute; right: 18px; left: 90px; bottom: calc(54% + 10px); z-index: 4;
     font-size: 9.5px; font-weight: 700; color: var(--ink-muted); text-align: right;
@@ -595,6 +601,7 @@
         <div class="diagram-box">
           <div id="sunDiagram"></div>
           <div id="vworld3dMap" style="display:none; width:100%; height:100%;"></div>
+          <div class="vworld-loading" id="vworldLoading">🌐 실사 3D 불러오는 중… (최대 20초 정도 걸려요)</div>
         </div>
       </div>
     </div>
@@ -1257,9 +1264,14 @@
   // "가장 빠른 길"을 포함한 모든 경로 계산의 기본 바탕으로 보도·횡단보도를 우선하고
   // 차도는 꼭 필요할 때만(연결이 그 길밖에 없을 때) 쓰도록 기본 가중치를 둔다.
   const VEHICLE_ROAD_PENALTY = 0.6;
+  // 횡단보도(OSM highway=crossing 태그)로 확인된 edge는 실제로 우선 선택되도록 약간의
+  // 할인을 준다 — 데이터엔 있었지만("횡단보도를 인식해서 가는거 맞아?") 예전엔 아무
+  // 가중치 계산에서도 이 필드를 실제로 안 읽고 있었다. 이제 baseWalkWeight/
+  // weightedEdgeCost 둘 다에서 읽는다.
+  const CROSSWALK_BONUS = 0.15;
   function baseWalkWeight(idx) {
     const e = GRAPH.edges[idx];
-    return e.distanceM * (1 + (e.vehicleRoad ? VEHICLE_ROAD_PENALTY : 0));
+    return e.distanceM * (1 + (e.vehicleRoad ? VEHICLE_ROAD_PENALTY : 0) - (e.crossing ? CROSSWALK_BONUS : 0));
   }
   // 차도 회피(road penalty)와 햇빛/비/경사 회피(exposure)를 예전엔 곱해서 하나의 배수로
   // 합쳤는데, 그러면 두 페널티가 서로를 증폭시켜서 "회피 배수를 아무리 올려도 차도
@@ -1270,8 +1282,9 @@
   function weightedEdgeCost(idx, exposureMult) {
     const e = GRAPH.edges[idx];
     const roadPenalty = e.vehicleRoad ? VEHICLE_ROAD_PENALTY : 0;
+    const crossingBonus = e.crossing ? CROSSWALK_BONUS : 0;
     const exposurePenalty = exposureMult ? combinedExposureForIdx(idx) * exposureMult : 0;
-    return e.distanceM * (1 + roadPenalty + exposurePenalty);
+    return e.distanceM * (1 + roadPenalty - crossingBonus + exposurePenalty);
   }
   // 경로 전체의 평균 노출도를 combinedExposureForIdx와 같은 방식(켜진 조건들의 평균)으로
   // 계산 — "balanced/optimal이 fastest보다 실제로 나은가"를 검증하는 데 씀.
@@ -1620,6 +1633,9 @@
       icon: L.divIcon({ className: '', html: '<div class="coverage-badge">🔵 지원 구역</div>', iconSize: [0, 0] }),
       interactive: false,
     }).addTo(leafletMap);
+    crosswalkSegments().forEach((seg) => {
+      L.polyline(seg, { color: '#ffe14d', weight: 5, opacity: 0.9, lineCap: 'round' }).addTo(leafletMap);
+    });
     leafletMap.on('click', (e) => onMapPointPicked(e.latlng.lat, e.latlng.lng));
     setTimeout(() => leafletMap.invalidateSize(), 200);
     if (window.__lastRoutes) renderMapRoutes(window.__lastRoutes);
@@ -1681,6 +1697,12 @@
         map: tmapMap,
         position: new Tmapv3.LatLng(COVERAGE_BBOX.north, (COVERAGE_BBOX.west + COVERAGE_BBOX.east) / 2),
         iconHTML: '<div class="coverage-badge">🔵 지원 구역</div>',
+      });
+      crosswalkSegments().forEach((seg) => {
+        new Tmapv3.Polyline({
+          map: tmapMap, path: seg.map(([lat, lng]) => new Tmapv3.LatLng(lat, lng)),
+          strokeColor: '#ffe14d', strokeWeight: 5, strokeOpacity: 0.9,
+        });
       });
       // Tmap Vector JS 클릭 이벤트 payload 형식이 문서로 확인이 안 돼서, 대신 지도 컨테이너의
       // 원시 DOM 클릭 좌표를 받아 확인된 API인 screenToReal()로 좌표 변환한다 (더 안전한 방법).
@@ -1749,6 +1771,12 @@
             content: '<div class="coverage-badge">🔵 지원 구역</div>',
             yAnchor: 1.2,
           });
+          crosswalkSegments().forEach((seg) => {
+            new kakao.maps.Polyline({
+              map: kakaoMap, path: seg.map(([lat, lng]) => new kakao.maps.LatLng(lat, lng)),
+              strokeWeight: 5, strokeColor: '#ffe14d', strokeOpacity: 0.9,
+            });
+          });
           kakao.maps.event.addListener(kakaoMap, 'click', (mouseEvent) => {
             onMapPointPicked(mouseEvent.latLng.getLat(), mouseEvent.latLng.getLng());
           });
@@ -1768,6 +1796,17 @@
     return L.divIcon({ className: '', html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #090909;box-shadow:0 0 0 2px ${color}55;"></div>`, iconSize: [14, 14], iconAnchor: [7, 7] });
   }
   function nodePathToLatLng(nodePath) { return nodePath.map((id) => [GRAPH.nodes[id].lat, GRAPH.nodes[id].lng]); }
+
+  // 횡단보도(OSM 실측 태그) 위치를 지도에 표시 — "횡단보도를 인식하는지 눈으로 보여달라"
+  // 는 요청. 전체 340여 개뿐이라 route 상관없이 항상 다 그린다.
+  let crosswalkSegmentsCache = null;
+  function crosswalkSegments() {
+    if (crosswalkSegmentsCache) return crosswalkSegmentsCache;
+    crosswalkSegmentsCache = GRAPH.edges
+      .filter((e) => e.crossing)
+      .map((e) => [[GRAPH.nodes[e.from].lat, GRAPH.nodes[e.from].lng], [GRAPH.nodes[e.to].lat, GRAPH.nodes[e.to].lng]]);
+    return crosswalkSegmentsCache;
+  }
 
   // 햇빛 피하기가 켜져 있으면 추천 경로는 단색 대신 구간별 노출도 색으로 표시한다
   // (3D 모식도와 같은 발상을 2D 지도에도 적용 — "지도 위에 일조량 표시").
@@ -2127,6 +2166,7 @@
       return;
     }
     vworldState = 'waiting';
+    document.getElementById('vworldLoading').classList.add('show');
     // webglMapInit.js.do 태그 자체는 로드돼도, 그 안에서 document.write로 끼워 넣는
     // WSViewerStartup.js 등 하위 스크립트들은 비동기라 window.vw가 바로 있지 않다.
     // 그래서 콜백 대신 짧은 간격으로 폴링해서 준비될 때까지 기다린다.
@@ -2137,9 +2177,10 @@
         initVWorldMap();
         return;
       }
-      if (Date.now() - startedAt > 8000) {
+      if (Date.now() - startedAt > 25000) {
         clearInterval(poll);
         vworldState = 'failed';
+        document.getElementById('vworldLoading').classList.remove('show');
         console.warn('V-World 3D 타임아웃 — 도메인 미등록이거나 인증 대기 중일 수 있음. 모식도로 유지합니다.');
       }
     }, 300);
@@ -2150,6 +2191,7 @@
         vworldState = 'ready';
         document.getElementById('vworld3dMap').style.display = 'block';
         document.getElementById('sunDiagram').style.display = 'none';
+        document.getElementById('vworldLoading').classList.remove('show');
         console.log('V-World 실사 3D 로드 성공');
       };
       const map = new vw.Map();
@@ -2159,12 +2201,20 @@
         logo: false, navigation: true,
       });
       map.start();
-      // ws3dInitCallBack이 (도메인 인증 실패 등으로) 끝내 안 오는 경우 대비
+      // ws3dInitCallBack이 (도메인 인증 실패 등으로) 끝내 안 오는 경우 대비. 실측해보니
+      // (check2DNum.do/checkWGLNum.do 인증 확인까지 포함해서) 탭을 누른 뒤 실제로 뜰
+      // 때까지 15초 가까이 걸릴 때가 있어서, 너무 짧게 잡으면 거의 다 됐는데 포기하고
+      // 모식도로 되돌아가는 상황이 생긴다.
       setTimeout(() => {
-        if (vworldState === 'waiting') { vworldState = 'failed'; console.warn('V-World 3D 초기화 콜백 타임아웃 — 모식도로 유지합니다.'); }
-      }, 6000);
+        if (vworldState === 'waiting') {
+          vworldState = 'failed';
+          document.getElementById('vworldLoading').classList.remove('show');
+          console.warn('V-World 3D 초기화 콜백 타임아웃 — 모식도로 유지합니다.');
+        }
+      }, 20000);
     } catch (e) {
       vworldState = 'failed';
+      document.getElementById('vworldLoading').classList.remove('show');
       console.warn('V-World 3D 초기화 실패:', e.message);
     }
   }
