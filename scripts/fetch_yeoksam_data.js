@@ -47,6 +47,19 @@ function haversine(a, b) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
+// 역삼동 OSM 건물의 84%가 height/building:levels 태그가 없어서, 그 경우엔 최소한
+// building=* 유형 태그로 층수를 추정한다 (전부 12m로 뭉개는 것보다 정밀함).
+// 값은 강남 지역 실제 건물 규모에 대한 대략적인 가정이며, 정확한 실측치는 아니다.
+const TYPE_DEFAULT_HEIGHT_M = {
+  house: 6, detached: 6, bungalow: 6, semidetached_house: 6, terrace: 8,
+  garage: 3, garages: 3, shed: 3, hut: 3, roof: 3, greenhouse: 3, carport: 3,
+  residential: 9,
+  apartments: 30,
+  office: 15, commercial: 15, retail: 12, industrial: 8, warehouse: 8,
+  school: 12, hospital: 15, government: 12, civic: 12, university: 15,
+  hotel: 20,
+  yes: 10, // OSM에서 가장 흔한 무정보 태그 — 일반 도심 저층 건물 기본값
+};
 function parseHeightMeters(tags) {
   if (tags.height) {
     const m = parseFloat(String(tags.height).replace(/[^0-9.]/g, ''));
@@ -56,7 +69,7 @@ function parseHeightMeters(tags) {
     const lv = parseFloat(tags['building:levels']);
     if (!isNaN(lv) && lv > 0) return lv * 3;
   }
-  return 12; // 데이터 없는 저층 건물 기본값
+  return TYPE_DEFAULT_HEIGHT_M[tags.building] || 10;
 }
 
 async function main() {
