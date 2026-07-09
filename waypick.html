@@ -1200,6 +1200,28 @@
     const e = GRAPH.edges[idx];
     return e.distanceM * (1 + (e.vehicleRoad ? VEHICLE_ROAD_PENALTY : 0));
   }
+  // 차도 회피(road penalty)와 햇빛/비/경사 회피(exposure)를 예전엔 곱해서 하나의 배수로
+  // 합쳤는데, 그러면 두 페널티가 서로를 증폭시켜서 "회피 배수를 아무리 올려도 차도
+  // 페널티에 묻혀 경로가 안 바뀌는" 문제가 있었다 (실측: 여름 오후 햇빛 피하기를 켜도
+  // 오히려 노출도가 더 높은 경로가 나옴). distanceM에 두 페널티를 각각 더해서 독립적으로
+  // 작용하게 하면, exposureMult를 올릴수록 차도 페널티와 무관하게 확실히 더 강하게
+  // 반영된다.
+  function weightedEdgeCost(idx, exposureMult) {
+    const e = GRAPH.edges[idx];
+    const roadPenalty = e.vehicleRoad ? VEHICLE_ROAD_PENALTY : 0;
+    const exposurePenalty = exposureMult ? combinedExposureForIdx(idx) * exposureMult : 0;
+    return e.distanceM * (1 + roadPenalty + exposurePenalty);
+  }
+  // 경로 전체의 평균 노출도를 combinedExposureForIdx와 같은 방식(켜진 조건들의 평균)으로
+  // 계산 — "balanced/optimal이 fastest보다 실제로 나은가"를 검증하는 데 씀.
+  function routeCombinedExposure(info) {
+    const parts = [];
+    if (activeConditions.has('sun')) parts.push(info.sun);
+    if (activeConditions.has('rain')) parts.push(info.rain);
+    if (slopeConsidered()) parts.push(info.slope);
+    if (!parts.length) return 0;
+    return parts.reduce((a, b) => a + b, 0) / parts.length;
+  }
   function computeThreeRoutes(startId, endId) {
     const fastestRun = dijkstra(startId, endId, (idx) => baseWalkWeight(idx));
     if (!fastestRun) return null;
@@ -1207,17 +1229,31 @@
 
     if (activeConditions.size === 0) return { fastest, balanced: fastest, optimal: fastest };
 
-    const balancedRun = dijkstra(startId, endId, (idx) => baseWalkWeight(idx) * (1 + combinedExposureForIdx(idx) * 1.4));
-    const balanced = balancedRun ? routeInfo(balancedRun.edgePath, balancedRun.nodePath) : fastest;
-
-    const candidates = [3.0, 2.2, 1.6, 1.0];
-    let optimal = balanced;
+    // 회피 배수를 강하게(80) ~ 약하게(1.4) 순서로 시도한다. 실측해보니 이 그래프에서는
+    // 배수를 어느 정도(대략 11~12) 넘겨야 경로 자체가 바뀌는 "문턱"이 있어서, 예전처럼
+    // 배수 몇 개만 좁게 시도하면 전부 문턱 아래에 걸려 fastest와 똑같거나 더 나쁜 경로가
+    // "최적"으로 나오는 경우가 있었다 (실제로 햇빛 피하기를 켰는데 fastest보다 노출도가
+    // 더 높은 길이 추천된 사례 확인). 그래서 이제는 후보마다 우회 허용범위(1.45배)뿐
+    // 아니라 "fastest보다 실제로 노출도가 나아지는지"까지 확인하고, 강한 배수부터 처음
+    // 성공한 걸 optimal, 그중 가장 약한(=우회가 제일 적은) 성공을 balanced로 쓴다.
+    // 아무 배수도 개선을 못 찾으면(진짜 대안이 없는 경우) 억지로 나쁜 길을 보여주지 않고
+    // fastest를 그대로 보여준다.
+    const candidates = [80, 40, 20, 12, 6, 3, 1.4];
+    const fastestExposure = routeCombinedExposure(fastest);
+    let optimal = null, balanced = null;
     for (const m of candidates) {
-      const run = dijkstra(startId, endId, (idx) => baseWalkWeight(idx) * (1 + combinedExposureForIdx(idx) * m));
+      const run = dijkstra(startId, endId, (idx) => weightedEdgeCost(idx, m));
       if (!run) continue;
       const info = routeInfo(run.edgePath, run.nodePath);
-      if (info.distanceM / fastest.distanceM <= 1.45) { optimal = info; break; }
+      const detourOk = info.distanceM / fastest.distanceM <= 1.45;
+      const improved = routeCombinedExposure(info) <= fastestExposure + 0.002;
+      if (detourOk && improved) {
+        if (!optimal) optimal = info;
+        balanced = info;
+      }
     }
+    if (!optimal) optimal = fastest;
+    if (!balanced) balanced = fastest;
     return { fastest, balanced, optimal };
   }
 
