@@ -76,7 +76,7 @@ async function main() {
   console.log('Overpass 쿼리 전송 중...', OVERPASS_URL);
   const res = await fetch(OVERPASS_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'text/plain', 'User-Agent': 'wantroad-data-build/1.0' },
+    headers: { 'Content-Type': 'text/plain', 'User-Agent': 'waypick-data-build/1.0' },
     body: QUERY,
   });
   if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);

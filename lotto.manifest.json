@@ -1,0 +1,14 @@
+{
+  "name": "로또 번호 추첨기",
+  "short_name": "LOTTO.GEN",
+  "description": "6/45 무작위 로또 번호 추첨기",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#090909",
+  "theme_color": "#090909",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

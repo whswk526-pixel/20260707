@@ -1,0 +1,14 @@
+{
+  "name": "WAYPICK — 내가 원하는 길을 고르다",
+  "short_name": "WAYPICK",
+  "description": "역삼동 일조량·비 회피 보행 경로 안내",
+  "start_url": "./waypick.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#090909",
+  "theme_color": "#090909",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
