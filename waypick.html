@@ -369,6 +369,12 @@
     padding: 7px 8px; outline: none;
   }
   .time-row select:focus { border-color: var(--accent-blue); }
+  .play-btn {
+    width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+    background: var(--accent-blue); color: #fff; border: none;
+    font-size: 12px; cursor: pointer; transition: background .15s;
+  }
+  .play-btn.playing { background: var(--gradient-coral); }
   .night-note {
     font-size: 11px; color: var(--ink-muted); background: var(--surface-1);
     border: 1px solid var(--hairline-soft); border-radius: var(--r-md);
@@ -534,6 +540,7 @@
     <div class="floating-tabs">
       <div class="ftab active" id="tab2dBtn" onclick="switchTab('2d')">🗺️ 2D</div>
       <div class="ftab" id="tab3dBtn" onclick="switchTab('3d')">🏙️ 3D</div>
+      <div class="ftab" id="tabSatBtn" onclick="switchTab('sat')">🛰️ 위성</div>
     </div>
 
     <div class="overlay-top">
@@ -580,6 +587,7 @@
       <div class="time-row">
         <label>📅 <select id="monthSelect" onchange="onTimeChange()"></select></label>
         <label>🕐 <select id="hourSelect" onchange="onTimeChange()"></select></label>
+        <button class="play-btn" id="playBtn" onclick="toggleTimeAnimation()" title="시간에 따라 해가 어떻게 움직이는지 재생">▶</button>
       </div>
       <div class="night-note" id="nightNote">🌙 이 시각엔 해가 떠 있지 않아 햇빛 계산이 적용되지 않아요 (비 피하기만 반영돼요).</div>
 
@@ -634,10 +642,8 @@
   const CONFIG = {
     // openapi.sk.com에서 발급받은 실제 작동 확인된 키. Tmap을 최우선으로 쓴다.
     TMAP_APP_KEY: '29KXFOvgtQ8P1pyMPn8yybASpgcnje8NNA7ZgZ00',
-    // 카카오디벨로퍼스에 localhost:5500 / 실제 배포 도메인을 "Web 플랫폼"으로 등록한 뒤
-    // 여기 다시 넣어주세요 (도메인 미등록 상태로 넣으면 "domain mismatched" 에러가 나서
-    // 자동으로 Leaflet 지도로 대체됩니다). 발급받은 키: 268479ed7c37ff0bb7739e36e854586b
-    KAKAO_JS_KEY: '',
+    // 도메인 미등록이면 "domain mismatched" 에러가 나서 자동으로 Tmap -> Leaflet 순으로 대체됩니다.
+    KAKAO_JS_KEY: '268479ed7c37ff0bb7739e36e854586b',
     // sgis.kostat.go.kr Open API에서 발급받은 값 (배경지도/통계주제도용, 현재 미사용)
     SGIS_CONSUMER_KEY: '',
     SGIS_CONSUMER_SECRET: '',
@@ -939,12 +945,17 @@
   }
 
   // 체크된 조건 개수만큼 평균 — 조건이 늘어나도(경사 등) 그대로 확장되는 구조
+  // 경사·계단은 햇빛/비 피하기 중 하나라도 켜져 있으면 체크 여부와 상관없이 같이 반영한다
+  // (사용자 요청: "경사도는 해피하기 비피하기 둘 다 들어가고").
+  function slopeConsidered() {
+    return activeConditions.has('slope') || activeConditions.has('sun') || activeConditions.has('rain');
+  }
   function combinedExposureForIdx(idx) {
     const meta = EDGE_META[idx];
     const parts = [];
     if (activeConditions.has('sun')) parts.push(meta.sunExposure * (SUN_STATE.isDaytime ? SUN_STATE.monthProb : 0));
     if (activeConditions.has('rain')) parts.push(meta.rainExposure);
-    if (activeConditions.has('slope')) parts.push(meta.slopeExposure);
+    if (slopeConsidered()) parts.push(meta.slopeExposure);
     if (!parts.length) return 0;
     return parts.reduce((a, b) => a + b, 0) / parts.length;
   }
@@ -1106,13 +1117,15 @@
 
   // ==================== 지도 (Leaflet 기본, 우선순위: Tmap > 카카오맵 > Leaflet) ====================
   const ROUTE_COLORS = { fastest: '#999999', balanced: '#0099ff', optimal: '#6a4cf5' };
-  let leafletMap = null, routeLayerGroup = null;
+  let leafletMap = null, routeLayerGroup = null, leafletBaseLayer = null, satelliteLayer = null;
   let kakaoMap = null, kakaoOverlays = [];
   let tmapMap = null, tmapOverlays = [];
-  // Tmap SDK는 <head>의 정적 <script>가 이미 로드를 시도한 뒤이므로, 실제로 성공했는지는
-  // Tmapv3 전역이 만들어졌는지로 판단한다 (키/구독 문제로 실패하면 정의 자체가 안 됨).
-  let usingTmap = !!CONFIG.TMAP_APP_KEY && typeof Tmapv3 !== 'undefined' && !window.__tmapScriptFailed;
-  let usingKakao = !usingTmap && !!CONFIG.KAKAO_JS_KEY;
+  // 우선순위: 카카오맵(등록된 키가 있으면) > Tmap(작동 확인된 키) > Leaflet(키 불필요, 항상 성공).
+  // 카카오가 실패하면 Tmap으로, Tmap도 실패하면 Leaflet으로 순서대로 넘어간다.
+  let usingKakao = false, usingTmap = false;
+  function tmapAvailable() {
+    return !!CONFIG.TMAP_APP_KEY && typeof Tmapv3 !== 'undefined' && !window.__tmapScriptFailed;
+  }
 
   // ==================== 지도 클릭으로 출발/도착 지정 ====================
   let customCoords = { origin: null, dest: null };
@@ -1141,8 +1154,8 @@
   }
 
   function initMap() {
-    if (usingTmap) { loadTmapMap(); return; }
-    if (usingKakao) { loadKakaoMap(); return; }
+    if (CONFIG.KAKAO_JS_KEY) { loadKakaoMap(); return; }
+    if (tmapAvailable()) { usingTmap = true; loadTmapMap(); return; }
     initLeaflet();
   }
   function initLeaflet() {
@@ -1154,7 +1167,7 @@
     leafletMap = L.map('leafletMap', { zoomControl: false, attributionControl: true }).setView([CENTER_LAT, CENTER_LNG], 16);
     L.control.zoom({ position: 'bottomright' }).addTo(leafletMap);
     leafletMap.attributionControl.setPosition('bottomleft');
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    leafletBaseLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
       subdomains: 'abcd', maxZoom: 19, attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
     }).addTo(leafletMap);
     routeLayerGroup = L.layerGroup().addTo(leafletMap);
@@ -1170,8 +1183,14 @@
     setTimeout(() => leafletMap.invalidateSize(), 200);
     if (window.__lastRoutes) renderMapRoutes(window.__lastRoutes);
   }
-  // Tmap/카카오맵이 로드에 실패하면 화면이 비지 않도록 Leaflet로 자동 전환한다.
+  // 카카오맵이 실패하면 Tmap을, Tmap도 안 되면 Leaflet을 순서대로 시도한다.
   let mapFellBack = false;
+  function fallbackFromKakao(reason) {
+    if (mapFellBack) return;
+    usingKakao = false;
+    console.warn('카카오맵 로드 실패:', reason);
+    if (tmapAvailable()) { usingTmap = true; loadTmapMap(); } else { fallbackToLeaflet(reason); }
+  }
   function fallbackToLeaflet(reason) {
     if (mapFellBack) return;
     mapFellBack = true;
@@ -1223,10 +1242,11 @@
     document.getElementById('kakaoMap').style.display = 'block';
     const script = document.createElement('script');
     script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${CONFIG.KAKAO_JS_KEY}&autoload=false`;
-    script.onerror = () => fallbackToLeaflet('script load error (도메인 미등록일 가능성)');
+    script.onerror = () => fallbackFromKakao('script load error (도메인 미등록일 가능성)');
     script.onload = () => {
       try {
         kakao.maps.load(() => {
+          usingKakao = true;
           kakaoMap = new kakao.maps.Map(document.getElementById('kakaoMap'), {
             center: new kakao.maps.LatLng(CENTER_LAT, CENTER_LNG), level: 4,
           });
@@ -1247,12 +1267,12 @@
           if (window.__lastRoutes) renderMapRoutes(window.__lastRoutes);
         });
       } catch (e) {
-        fallbackToLeaflet(e.message);
+        fallbackFromKakao(e.message);
       }
     };
     document.head.appendChild(script);
     // 스크립트 자체는 로드됐지만 kakao.maps.load 콜백이 끝내 안 오는 경우(예: 인증 실패 후 조용히 멈춤) 대비
-    setTimeout(() => { if (!kakaoMap) fallbackToLeaflet('타임아웃 (5초 내 지도 생성 안 됨)'); }, 5000);
+    setTimeout(() => { if (!kakaoMap) fallbackFromKakao('타임아웃 (5초 내 지도 생성 안 됨)'); }, 5000);
   }
   function dotIcon(color) {
     return L.divIcon({ className: '', html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #090909;box-shadow:0 0 0 2px ${color}55;"></div>`, iconSize: [14, 14], iconAnchor: [7, 7] });
@@ -1266,14 +1286,23 @@
     const exp = EDGE_META[edgeIdx] ? EDGE_META[edgeIdx].sunExposure : 0;
     return exp > 0.66 ? '#ff5a1f' : exp > 0.33 ? '#ffb020' : '#0099ff';
   }
+  // 색이 바뀌는 지점에서만 나눠서, 엣지 하나당 폴리라인 하나씩 만들지 않게 한다
+  // (지도 API마다 오버레이가 많아지면 확대/축소가 느려짐 — Tmap에서 실측된 문제).
   function routeSegments(route, useSunColor) {
-    const segs = [];
+    const runs = [];
+    let cur = null;
     for (let i = 0; i < route.nodePath.length - 1; i++) {
       const a = GRAPH.nodes[route.nodePath[i]], b = GRAPH.nodes[route.nodePath[i + 1]];
       const color = useSunColor ? sunExposureColor(route.edgePath[i]) : null;
-      segs.push({ from: [a.lat, a.lng], to: [b.lat, b.lng], color });
+      if (cur && cur.color === color) {
+        cur.points.push([b.lat, b.lng]);
+      } else {
+        if (cur) runs.push(cur);
+        cur = { color, points: [[a.lat, a.lng], [b.lat, b.lng]] };
+      }
     }
-    return segs;
+    if (cur) runs.push(cur);
+    return runs;
   }
 
   function renderMapRoutes(routes) {
@@ -1291,7 +1320,7 @@
           if (isRec && colorBySun) {
             for (const seg of routeSegments(r, true)) {
               const line = new Tmapv3.Polyline({
-                path: [new Tmapv3.LatLng(...seg.from), new Tmapv3.LatLng(...seg.to)],
+                path: seg.points.map(([lat, lng]) => new Tmapv3.LatLng(lat, lng)),
                 strokeColor: seg.color, strokeWeight: 6, strokeOpacity: 0.95, map: tmapMap,
               });
               tmapOverlays.push(line);
@@ -1349,7 +1378,7 @@
       const isRec = key === recKey;
       if (isRec && colorBySun) {
         for (const seg of routeSegments(r, true)) {
-          L.polyline([seg.from, seg.to], { color: seg.color, weight: 5, opacity: 0.95, lineCap: 'round' }).addTo(routeLayerGroup);
+          L.polyline(seg.points, { color: seg.color, weight: 5, opacity: 0.95, lineCap: 'round' }).addTo(routeLayerGroup);
         }
         return;
       }
@@ -1545,20 +1574,68 @@
     render();
   }
   function onTimeChange() { computeExposures(); render(); }
+
+  // 시간에 따라 해가 움직이는 걸 눈으로 보여주는 재생 기능
+  let timeAnimTimer = null;
+  function toggleTimeAnimation() {
+    const btn = document.getElementById('playBtn');
+    if (timeAnimTimer) {
+      clearInterval(timeAnimTimer);
+      timeAnimTimer = null;
+      btn.textContent = '▶'; btn.classList.remove('playing');
+      return;
+    }
+    btn.textContent = '■'; btn.classList.add('playing');
+    const hourSel = document.getElementById('hourSelect');
+    timeAnimTimer = setInterval(() => {
+      const next = (parseInt(hourSel.value, 10) + 1) % 24;
+      hourSel.value = String(next);
+      onTimeChange();
+    }, 650);
+  }
   function toggleSheet() {
     document.getElementById('bottomSheet').classList.toggle('collapsed');
   }
   function switchTab(tab) {
     currentTab = tab;
+    const showMapPanel = tab === '2d' || tab === 'sat'; // 위성은 3D처럼 별도 패널이 아니라 2D 지도의 타일만 바꾼 것
     document.getElementById('tab2dBtn').classList.toggle('active', tab === '2d');
     document.getElementById('tab3dBtn').classList.toggle('active', tab === '3d');
-    document.getElementById('tab2dPanel').classList.toggle('active', tab === '2d');
+    document.getElementById('tabSatBtn').classList.toggle('active', tab === 'sat');
+    document.getElementById('tab2dPanel').classList.toggle('active', showMapPanel);
     document.getElementById('tab3dPanel').classList.toggle('active', tab === '3d');
     // 범례/힌트(2D 전용)와 모식도 캡션(3D 전용)은 이제 tab-panel 밖에 떠 있어서 직접 켜고 꺼야 함
-    document.getElementById('mapLegend').style.display = tab === '2d' ? '' : 'none';
+    document.getElementById('mapLegend').style.display = showMapPanel ? '' : 'none';
     document.getElementById('diagramCaption').style.display = tab === '3d' ? '' : 'none';
-    if (tab === '2d' && leafletMap) setTimeout(() => leafletMap.invalidateSize(), 50);
+    applyMapType(tab === 'sat' ? 'SATELLITE' : 'ROAD');
+    if (showMapPanel && leafletMap) setTimeout(() => leafletMap.invalidateSize(), 50);
     if (tab === '3d' && window.__lastRoutes) renderSunDiagram(window.__lastRoutes);
+  }
+  // Tmap은 setMapType("SATELLITE"/"ROAD")로 확인됨(SDK 번들 직접 확인). 카카오는
+  // MapTypeId.HYBRID/ROADMAP, Leaflet은 타일 레이어 자체를 바꿔치기한다.
+  function applyMapType(type) {
+    try {
+      if (usingTmap && tmapMap && typeof tmapMap.setMapType === 'function') tmapMap.setMapType(type);
+    } catch (e) { console.warn('Tmap 지도 타입 전환 실패:', e.message); }
+    try {
+      if (usingKakao && kakaoMap && typeof kakaoMap.setMapTypeId === 'function') {
+        kakaoMap.setMapTypeId(type === 'SATELLITE' ? kakao.maps.MapTypeId.HYBRID : kakao.maps.MapTypeId.ROADMAP);
+      }
+    } catch (e) { console.warn('카카오 지도 타입 전환 실패:', e.message); }
+    if (leafletMap) {
+      if (type === 'SATELLITE') {
+        if (!satelliteLayer) {
+          satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 19, attribution: 'Esri, Maxar, Earthstar Geographics',
+          });
+        }
+        if (leafletBaseLayer) leafletMap.removeLayer(leafletBaseLayer);
+        satelliteLayer.addTo(leafletMap);
+      } else {
+        if (satelliteLayer) leafletMap.removeLayer(satelliteLayer);
+        if (leafletBaseLayer) leafletBaseLayer.addTo(leafletMap);
+      }
+    }
   }
   function selectRoute(key) {
     selectedRouteKey = key;
@@ -1581,7 +1658,7 @@
       const pct = Math.max(0, Math.round((fastest.rain - route.rain) / Math.max(fastest.rain, 0.01) * 100));
       fragments.push(`비 노출 <b>${pct}%↓</b>`);
     }
-    if (activeConditions.has('slope')) {
+    if (slopeConsidered()) {
       const pct = Math.max(0, Math.round((fastest.slope - route.slope) / Math.max(fastest.slope, 0.01) * 100));
       fragments.push(`경사·계단 <b>${pct}%↓</b>`);
     }
@@ -1615,7 +1692,7 @@
     const stats = [];
     if (activeConditions.has('sun')) stats.push(`<div class="stat-chip key"><span>☀️</span><span>햇빛 ${Math.round(route.sun * 100)}%</span></div>`);
     if (activeConditions.has('rain')) stats.push(`<div class="stat-chip key"><span>🌧️</span><span>비 ${Math.round(route.rain * 100)}%</span></div>`);
-    if (activeConditions.has('slope')) stats.push(`<div class="stat-chip key"><span>⛰️</span><span>경사·계단 ${Math.round(route.slope * 100)}%</span></div>`);
+    if (slopeConsidered()) stats.push(`<div class="stat-chip key"><span>⛰️</span><span>경사·계단 ${Math.round(route.slope * 100)}%</span></div>`);
     document.getElementById('routeDetail').innerHTML = `
       <div class="result-top">
         <span class="badge ${isRecommended ? 'rec' : ''}">${isRecommended ? '추천' : ROUTE_LABELS[key]}</span>
